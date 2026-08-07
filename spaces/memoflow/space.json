@@ -1,0 +1,10 @@
+{
+  "id": "memoflow",
+  "name": { "zh": "闪念盒", "en": "MemoFlow" },
+  "icon": "zap",
+  "version": "1.0.0",
+  "layout": {
+    "main": [{ "type": "plugin:memoflow:memos" }]
+  },
+  "requires": { "views": ["plugin:memoflow:memos"] }
+}
