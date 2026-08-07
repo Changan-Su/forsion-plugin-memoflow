@@ -96,3 +96,7 @@ sh install.sh prod    # 安装到 ~/.forsion;开发家用 sh install.sh(默认 d
 ```bash
 node check.mjs   # mock ctx + DOM 垫片 + 冻钟,全绿为过
 ```
+
+## 许可
+
+[Apache-2.0](./LICENSE) © 2026 Changan-Su
