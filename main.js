@@ -7,6 +7,8 @@
  *
  * 安全:一切用户/模型产出文本只走 createElement + textContent(全文件不含任何 HTML 字符串注入面)。
  * 兼容:07-18 之后的 ctx 面一律可选链,旧宿主缺席时优雅降级(藏按钮 / 回退 ctx.app.notify)。
+ * 双语:MSG.zh / MSG.en 两侧键集合相等,L()/t() 取串;ctx.subscribeLocale 触发就地重画(视图不重挂)。
+ *      用户数据与一切路径不随语言变(工作文件夹 / 整理子夹 / 周整理文件名 / 哨兵 / localStorage 键)。
  * 时间:「现在」一律 Date.now();回溯正午锚定;全文件无周期定时器(check 冻钟可测)。
  */
 const PLUGIN_ID = 'memoflow'
@@ -20,7 +22,252 @@ const YM_RE = /^(\d{4})-(0[1-9]|1[0-2])$/
 // 解析时不算正文、不吃哨兵;写回时必须一字不动,哨兵绝不能追加到标记行上(否则破坏宿主块结构)。
 const MARKER_LINE = /^<!--\s*a\s+[A-Za-z0-9_-]+\s*-->\s*$/
 
-ctx.registerSetting({ key: 'reviewCount', label: '每日回顾条数', type: 'number', default: 4, min: 0, max: 20, description: '每天从 7 天前更早的未归档闪念里抽几条回顾;0 = 关闭每日回顾' })
+// ── 中英双语词表(zh/en 两侧键集合必须完全相等,check.mjs 有断言) ──────────────
+// 翻的只有 UI 文案 + 插件自己写进产物的说明行。**用户数据与一切路径绝不随语言变**:
+// 闪念正文 / 标签名 / 工作文件夹「闪念盒」/「整理」子夹 / `YYYY-Www-周整理.md` / 哨兵 /
+// localStorage 键 —— 路径跟着语言走 = 切个语言像换了数据目录,旧闪念当场「消失」。
+// 占位符一律 {name} 形式:英文语序与中文不同,不能靠模板串拼。
+// 数量与列表这两处「拼串」按语言取:英文句子里绝不能出现中文顿号,英文名词也得按 n 分单复数
+// (`1 memos` 会跟着周整理抬头落进磁盘长期留着)。计数一律走 nMemos/nMonthFiles,占位符是 {c} —— 它
+// 装的是**整个计数短语**(「3 条」/「3 memos」)而不是裸数字,所以两侧语序各写各的。
+const MSG = {
+  zh: {
+    listSep: '、',
+    settingReviewCount: '每日回顾条数',
+    settingReviewCountDesc: '每天从 7 天前更早的未归档闪念里抽几条回顾;0 = 关闭每日回顾',
+    appName: '闪念盒',
+    achCaptureTitle: '百念成川',
+    achCaptureDesc: '累计记下 100 条闪念',
+    achStreakTitle: '七日不断',
+    achStreakDesc: '连续 7 天都有记录',
+    cmdOpen: '闪念盒:打开',
+    cmdCapture: '闪念盒:快速记一条',
+    cmdDigest: '闪念盒:AI 周整理',
+    statusText: '✎ 闪念',
+    statusTitle: '快速记一条闪念',
+    hostTooOld: '宿主版本过旧,不支持工作台视图',
+    btnDigest: 'AI 周整理',
+    btnRebuild: '重建缓存',
+    btnShowArch: '显示归档',
+    stats: '共 {c} · 连续 {d} 天',
+    inputPlaceholder: '现在在想什么?Enter 发送,Shift+Enter 换行,# 打标签',
+    btnSend: '记下',
+    btnVoice: '🎙 语音',
+    btnVoiceStop: '● 结束录音',
+    btnVoiceBusy: '⋯ 转写中',
+    voiceHint: '按住说话,或点击开始 / 再点结束',
+    searchPlaceholder: '搜索闪念…',
+    btnCancel: '取消',
+    btnRetry: '重试',
+    btnGotIt: '知道了',
+    btnSave: '保存',
+    digestProgress: 'AI 周整理:{label}',
+    stagePrepare: '准备语料',
+    stageSubmit: '提交任务',
+    stageQueued: '排队中',
+    stageRunning: '整理中',
+    stageWriting: '生成周整理中',
+    stageDone: '完成',
+    digestBusy: '周整理已在进行中',
+    digestNoCorpus: '还没有可整理的闪念',
+    digestNeedLogin: '请先登录 Forsion',
+    digestNoEngine: '未连接到 Tangu 引擎',
+    digestEmptyOut: '模型没有返回内容',
+    digestOk: '周整理完成:{week}(已存入 {dir})',
+    digestFail: '周整理失败:{msg}',
+    digestCanceled: '已取消',
+    digestQuoteLabel: '原句',
+    digestHead: '> 由「闪念盒」AI 周整理生成 · {date} · 覆盖 {c}闪念',
+    noteSource: '> 来源:闪念盒 {ts}',
+    runStartFail: '起 run 失败 HTTP {code}',
+    runNoId: '引擎未返回 runId',
+    runSubFail: '订阅事件失败 HTTP {code}',
+    runErr: '整理失败',
+    runBroken: '与引擎的连接中断,未收到完成事件(可重试)',
+    readMemosFail: '读取闪念失败:{msg}',
+    micDenied: '麦克风权限被拒绝(打开 系统设置 › 隐私与安全 › 麦克风,允许本 App)',
+    micNone: '没检测到麦克风设备',
+    micOpenFail: '麦克风打不开:{msg}',
+    recStartFail: '录音器启动失败:{msg}',
+    recNoAudio: '没采集到声音(输入电平≈0):检查系统输入设备是否选对、麦克风没被静音',
+    recNotHeard: '没听清,再试一次',
+    quickNoPrompt: '当前宿主不支持快速输入,请打开闪念盒视图',
+    quickPrompt: '记一条闪念(可随手打 #标签)',
+    quickDone: '已记下 ✓',
+    quickFail: '记录失败:{msg}',
+    readMonthFail: '读取 {ym} 月文件失败:{msg}',
+    writeCanceled: '读取 {ym} 月文件失败,为防整月覆盖已取消写入;请稍后重试',
+    writeCanceledKnown: '读取 {ym} 月文件失败(本月应有约 {c}闪念),为防整月覆盖已取消写入;请稍后重试,或在视图里「重建缓存」',
+    editCanceled: '读取 {ym} 月文件失败,已取消本次修改以防整月覆盖,请稍后重试',
+    editCanceledGone: '{ym} 月文件不存在或暂不可读,已取消本次修改;若确认月文件已删除,请点「重建缓存」收编现状',
+    rebuildRefused: '有 {c}读取失败({list}),已取消缓存重建以防证词清零;请稍后重试',
+    monthsFailed: '有 {c}读取失败({list}),时间线暂缺这些月份;写入防线仍在',
+    loading: '加载中…',
+    loadFail: '读取闪念失败',
+    emptyTitle: '还没有闪念',
+    emptyHint: '上面输入框随手记一条;Enter 发送。也可以用状态栏「✎ 闪念」或命令面板「闪念盒:快速记一条」。',
+    noMatch: '没有匹配的闪念',
+    pinnedGroup: '📌 置顶 · {n} 条',
+    dayToday: '今天',
+    dayYesterday: '昨天',
+    flagPinned: '置顶',
+    flagArchived: '已归档',
+    actEdit: '编辑',
+    actPin: '置顶',
+    actUnpin: '取消置顶',
+    actArchive: '归档',
+    actRestore: '恢复',
+    actToNote: '转笔记',
+    actDelete: '删除',
+    actSkip: '跳过',
+    reviewLabel: '每日回顾',
+    reviewHint: '过去的想法再看一眼 · 还剩 {left}/{total}',
+    reviewDone: '今日回顾完成 ✓',
+    heatCell: '{day} · {c}',
+    rebuildPrompt: '重建缓存:从哪个月开始扫描(YYYY-MM)',
+    rebuildBadMonth: '月份格式应为 YYYY-MM',
+    rebuildOk: '缓存已重建:共 {c}',
+    rebuildFail: '重建失败:{msg}',
+    deleteNoPrompt: '当前宿主不支持确认弹框,请改用「归档」',
+    deleteConfirm: '输入 y 确认删除这条闪念(不可恢复)',
+    deleted: '已删除',
+    deleteFail: '删除失败:{msg}',
+    toNoteOk: '已转为笔记(原条已归档)',
+    toNoteFail: '转笔记失败:{msg}',
+    saveFail: '保存失败:{msg}',
+  },
+  en: {
+    listSep: ', ',
+    settingReviewCount: 'Daily review count',
+    settingReviewCountDesc: 'How many memos from 7+ days ago to resurface each day; 0 turns Daily Review off',
+    appName: 'MemoFlow',
+    achCaptureTitle: 'Hundred Sparks',
+    achCaptureDesc: 'Capture 100 memos in total',
+    achStreakTitle: 'Seven Days Running',
+    achStreakDesc: 'Capture something 7 days in a row',
+    cmdOpen: 'MemoFlow: Open',
+    cmdCapture: 'MemoFlow: Quick Capture',
+    cmdDigest: 'MemoFlow: AI Weekly Digest',
+    statusText: '✎ Memo',
+    statusTitle: 'Capture a quick memo',
+    hostTooOld: 'This host is too old to open workbench views',
+    btnDigest: 'AI Weekly Digest',
+    btnRebuild: 'Rebuild Cache',
+    btnShowArch: 'Show Archived',
+    stats: '{c} · {d}-day streak',
+    inputPlaceholder: "What's on your mind? Enter to send, Shift+Enter for a new line, # to tag",
+    btnSend: 'Capture',
+    btnVoice: '🎙 Voice',
+    btnVoiceStop: '● Stop',
+    btnVoiceBusy: '⋯ Transcribing',
+    voiceHint: 'Hold to talk, or click to start and click again to stop',
+    searchPlaceholder: 'Search memos…',
+    btnCancel: 'Cancel',
+    btnRetry: 'Retry',
+    btnGotIt: 'Dismiss',
+    btnSave: 'Save',
+    digestProgress: 'AI Weekly Digest: {label}',
+    stagePrepare: 'Gathering memos',
+    stageSubmit: 'Submitting',
+    stageQueued: 'Queued',
+    stageRunning: 'Organizing',
+    stageWriting: 'Writing the digest',
+    stageDone: 'Done',
+    digestBusy: 'A weekly digest is already running',
+    digestNoCorpus: 'No memos to organize yet',
+    digestNeedLogin: 'Sign in to Forsion first',
+    digestNoEngine: 'Not connected to the Tangu engine',
+    digestEmptyOut: 'The model returned nothing',
+    digestOk: 'Weekly digest ready: {week} (saved to {dir})',
+    digestFail: 'Weekly digest failed: {msg}',
+    digestCanceled: 'Canceled',
+    digestQuoteLabel: 'Quotes',
+    digestHead: '> Generated by MemoFlow AI Weekly Digest · {date} · covering {c}',
+    noteSource: '> Source: MemoFlow memo · {ts}',
+    runStartFail: 'Could not start the run (HTTP {code})',
+    runNoId: 'The engine returned no runId',
+    runSubFail: 'Could not subscribe to run events (HTTP {code})',
+    runErr: 'The digest run failed',
+    runBroken: 'Lost the connection to the engine before it finished (you can retry)',
+    readMemosFail: 'Could not read your memos: {msg}',
+    micDenied: 'Microphone access denied (allow this app in System Settings › Privacy & Security › Microphone)',
+    micNone: 'No microphone found',
+    micOpenFail: 'Could not open the microphone: {msg}',
+    recStartFail: 'The recorder failed to start: {msg}',
+    recNoAudio: 'No audio captured (input level is about zero): check that the right input device is selected and not muted',
+    recNotHeard: 'Could not make that out — try again',
+    quickNoPrompt: 'This host has no quick input — open the MemoFlow view instead',
+    quickPrompt: 'Capture a memo (type # to add a tag)',
+    quickDone: 'Captured ✓',
+    quickFail: 'Capture failed: {msg}',
+    readMonthFail: 'Could not read the {ym} month file: {msg}',
+    writeCanceled: 'Could not read the {ym} month file, so the capture was canceled to keep the month from being overwritten. Please try again shortly.',
+    writeCanceledKnown: 'Could not read the {ym} month file (about {c} should be in it), so the capture was canceled to keep the month from being overwritten. Try again shortly, or use "Rebuild Cache" in the view.',
+    editCanceled: 'Could not read the {ym} month file, so this change was canceled to keep the month from being overwritten. Please try again shortly.',
+    editCanceledGone: 'The {ym} month file is missing or temporarily unreadable, so this change was canceled. If you deleted it on purpose, use "Rebuild Cache" to adopt what is on disk.',
+    rebuildRefused: '{c} could not be read ({list}), so the rebuild was canceled to keep the overwrite guard intact. Please try again shortly.',
+    monthsFailed: '{c} could not be read ({list}), so those months are missing from the timeline. The write guard is still on.',
+    loading: 'Loading…',
+    loadFail: 'Could not load your memos',
+    emptyTitle: 'No memos yet',
+    emptyHint: 'Jot one down in the box above and press Enter. You can also use the "✎ Memo" status bar button or the "MemoFlow: Quick Capture" command.',
+    noMatch: 'No memos match',
+    pinnedGroup: '📌 Pinned · {n}',
+    dayToday: 'Today',
+    dayYesterday: 'Yesterday',
+    flagPinned: 'Pinned',
+    flagArchived: 'Archived',
+    actEdit: 'Edit',
+    actPin: 'Pin',
+    actUnpin: 'Unpin',
+    actArchive: 'Archive',
+    actRestore: 'Restore',
+    actToNote: 'To Note',
+    actDelete: 'Delete',
+    actSkip: 'Skip',
+    reviewLabel: 'Daily Review',
+    reviewHint: 'Another look at older thoughts · {left}/{total} left',
+    reviewDone: "Today's review is done ✓",
+    heatCell: '{day} · {c}',
+    rebuildPrompt: 'Rebuild cache: scan from which month? (YYYY-MM)',
+    rebuildBadMonth: 'Month must look like YYYY-MM',
+    rebuildOk: 'Cache rebuilt: {c}',
+    rebuildFail: 'Rebuild failed: {msg}',
+    deleteNoPrompt: 'This host has no confirmation dialog — use Archive instead',
+    deleteConfirm: 'Type y to delete this memo (cannot be undone)',
+    deleted: 'Deleted',
+    deleteFail: 'Delete failed: {msg}',
+    toNoteOk: 'Turned into a note (the memo was archived)',
+    toNoteFail: 'Could not turn it into a note: {msg}',
+    saveFail: 'Save failed: {msg}',
+  },
+}
+/** 当前语言。旧宿主没有 getLocale → 回退中文(canonical)。 */
+const L = () => {
+  try { return ctx.getLocale && ctx.getLocale() === 'en' ? 'en' : 'zh' } catch { return 'zh' }
+}
+/** 取串;缺键回退中文,再缺回退键名本身(词表出洞时界面不会变空白)。 */
+function t(k, vars) {
+  const d = MSG[L()] || MSG.zh
+  let s = d[k] != null ? d[k] : (MSG.zh[k] != null ? MSG.zh[k] : k)
+  if (vars) { for (const n of Object.keys(vars)) s = s.split(`{${n}}`).join(String(vars[n])) }
+  return s
+}
+/** 计数短语:中文「N + 量词」,英文按 N 取单复数。词表里对应的占位符是 {c},装的是**整个短语**
+ *  而不是裸数字 —— 中文无复数、英文有,两侧语序也不同,只有算好再塞才能两边都地道。
+ *  周整理抬头也走它:`covering 1 memos` 这种会跟着产物长期留在磁盘上,不是「界面小瑕」。 */
+const nMemos = (n) => (L() === 'en' ? `${n} memo${n === 1 ? '' : 's'}` : `${n} 条`)
+const nMonthFiles = (n) => (L() === 'en' ? `${n} month file${n === 1 ? '' : 's'}` : `${n} 个月文件`)
+/** 列表分隔符按语言取:中文顿号绝不能拼进英文句子(月份清单等)。 */
+const joinList = (arr) => (arr || []).join(t('listSep'))
+/** 给人看的日期(数据里的 key 永远是 YYYY-MM-DD;只有展示这一处本地化)。 */
+function fmtDay(key) {
+  const p = String(key || '').split('-').map(Number)
+  if (!p[0] || !p[1] || !p[2]) return String(key || '')
+  try { return new Date(p[0], p[1] - 1, p[2], 12).toLocaleDateString(L() === 'zh' ? 'zh-CN' : 'en-US') } catch { return String(key || '') }
+}
+
+ctx.registerSetting({ key: 'reviewCount', label: t('settingReviewCount'), type: 'number', default: 4, min: 0, max: 20, description: t('settingReviewCountDesc') })
 
 // ── 小工具 ───────────────────────────────────────────────────────────────────
 const say = (m, o) => (ctx.notify ? ctx.notify(m, o) : ctx.app.notify(m))
@@ -258,15 +505,16 @@ const monthKnownCounts = new Map()
 const monthPreambles = new Map()
 /** 读月文件:宿主抛错原样上抛(err.ioFail = true),缺席/空文件给 null。写路径一律用它。 */
 async function readMonthRaw(ym) {
-  let t
-  try { t = await ctx.app.readFile(monthPath(ym)) }
+  // 局部变量刻意不叫 t:词表 helper 就叫 t(),重名会在 catch 里把它遮成 undefined
+  let raw
+  try { raw = await ctx.app.readFile(monthPath(ym)) }
   catch (e) {
-    const err = new Error(`读取 ${ym} 月文件失败:${(e && e.message) || e}`)
+    const err = new Error(t('readMonthFail', { ym, msg: (e && e.message) || e }))
     err.ioFail = true
     throw err
   }
-  if (!t) return null
-  const p = parseMonth(t)
+  if (!raw) return null
+  const p = parseMonth(raw)
   monthPreambles.set(ym, p.preamble)
   monthKnownCounts.set(ym, p.memos.length)
   return p.memos
@@ -325,7 +573,7 @@ async function writeCacheFile(c) { await ctx.app.writeFile(cachePath(), JSON.str
  *  下一次 addMemo 就可能把「读不到但存在」的整月覆写掉(P0 链条,check 有回归)。 */
 async function rebuildCacheFromStore(store) {
   const failed = (store && store.failedMonths) || []
-  if (failed.length) throw new Error(`有 ${failed.length} 个月文件读取失败(${failed.join('、')}),已取消缓存重建以防证词清零;请稍后重试`)
+  if (failed.length) throw new Error(t('rebuildRefused', { c: nMonthFiles(failed.length), list: joinList(failed) }))
   const c = cacheFromMemos(flatten(store).map((x) => x.m))
   c.builtAt = Date.now()
   await writeCacheFile(c)
@@ -361,10 +609,10 @@ function rememberTags(tags) {
 // ── 成就(旧宿主可选链;宿主自动加 plugin:memoflow: 前缀) ─────────────────
 ctx.achievements?.registerSeries({
   id: 'memoflow',
-  title: '闪念盒',
+  title: t('appName'),
   achievements: [
-    { id: 'capture-100', title: '百念成川', desc: '累计记下 100 条闪念', event: 'capture', goal: 100, points: 20 },
-    { id: 'streak-7', title: '七日不断', desc: '连续 7 天都有记录', event: 'streak7', goal: 1, points: 15 },
+    { id: 'capture-100', title: t('achCaptureTitle'), desc: t('achCaptureDesc'), event: 'capture', goal: 100, points: 20 },
+    { id: 'streak-7', title: t('achStreakTitle'), desc: t('achStreakDesc'), event: 'streak7', goal: 1, points: 15 },
   ],
 })
 function trackAchievements(cacheObj) {
@@ -399,19 +647,19 @@ async function addMemoInner(rawText) {
   // 写前防线第一道:读失败本身即拒写(不依赖任何证词)——「读不到却要整月重写」没有正当场景。
   let existing
   try { existing = await readMonthRaw(ym) }
-  catch { throw new Error(`读取 ${ym} 月文件失败,为防整月覆盖已取消写入;请稍后重试`) }
+  catch { throw new Error(t('writeCanceled', { ym })) }
   if (existing == null) {
     // 第二道:有的宿主把读失败折叠成 null;若本会话记忆或派生缓存证明本月应有数据,
     // 宁可拒写报错,也绝不把整月闪念覆写成只剩这一条(闪念不进回收站,损失不可恢复)。
     const known = Math.max(monthKnownCounts.get(ym) || 0, await cachedMonthCount(ym))
-    if (known > 0) throw new Error(`读取 ${ym} 月文件失败(本月应有约 ${known} 条闪念),为防整月覆盖已取消写入;请稍后重试,或在视图里「重建缓存」`)
+    if (known > 0) throw new Error(t('writeCanceledKnown', { ym, c: nMemos(known) }))
   }
   const memos = existing || []
   // ts 是身份键(编辑态 / 回顾 done 按 ts 匹配):同毫秒并发逐毫秒顺延,保证唯一
-  let t = now
-  let iso = new Date(t).toISOString()
+  let tms = now
+  let iso = new Date(tms).toISOString()
   const seen = new Set(memos.map((m) => m.ts))
-  while (seen.has(iso)) { t += 1; iso = new Date(t).toISOString() }
+  while (seen.has(iso)) { tms += 1; iso = new Date(tms).toISOString() }
   const memo = { ts: iso, text, pinned: false, archived: false }
   memos.push(memo)
   await writeMonth(ym, memos)
@@ -437,12 +685,12 @@ async function addMemoInner(rawText) {
 /** 状态栏 / 命令面板的最低摩擦入口:单行 prompt 直接落库,不开视图。 */
 async function quickCapture() {
   try {
-    if (!ctx.app.prompt) { say('当前宿主不支持快速输入,请打开闪念盒视图', { level: 'warning' }); return }
-    const v = await ctx.app.prompt('记一条闪念(可随手打 #标签)', '')
+    if (!ctx.app.prompt) { say(t('quickNoPrompt'), { level: 'warning' }); return }
+    const v = await ctx.app.prompt(t('quickPrompt'), '')
     if (v == null || !String(v).trim()) return
     await addMemo(v)
-    say('已记下 ✓', { level: 'success' })
-  } catch (e) { say(`记录失败:${(e && e.message) || e}`, { level: 'error' }) }
+    say(t('quickDone'), { level: 'success' })
+  } catch (e) { say(t('quickFail', { msg: (e && e.message) || e }), { level: 'error' }) }
 }
 /** 单条转笔记(免 AI):正文 + 来源时间戳落 整理/,原条打归档标。
  *  同日同首行不覆写:探测到同名文件已存在就追加 -2/-3 序号。 */
@@ -456,7 +704,8 @@ async function memoToNote(memo) {
     if (exist == null && !unknown) break
     p = `${base}-${i}.md`
   }
-  const body = `> 来源:闪念盒 ${memo.ts}\n\n${memo.text}\n`
+  // 产物**路径**不随语言变(见词表注释);只有插件自己写的这行来源说明按当前语言写。
+  const body = `${t('noteSource', { ts: memo.ts })}\n\n${memo.text}\n`
   await ctx.app.writeFile(p, body)
   ctx.activity?.log('to_note', { path: p })
   return p
@@ -472,18 +721,19 @@ async function getCfg() {
   return { backendUrl: '', token: '', modelId: '' }
 }
 async function runAgentPlain(cfg, sessionId, message, onTick, signal, onStage) {
+  // label 传的是**词表键**不是成品串:整理跑到一半用户切语言,进度条也要当场跟着变。
   const stage = (pct, label) => { if (onStage) onStage(pct, label) }
-  stage(6, '提交任务')
+  stage(6, 'stageSubmit')
   const h = { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` }
   const start = await fetch(`${cfg.backendUrl}/agent/runs`, {
     method: 'POST', headers: h, signal,
     body: JSON.stringify({ session_id: sessionId, model_id: cfg.modelId || undefined, app_id: APP_ID, message, attachments: [] }),
   })
-  if (!start.ok) throw new Error((await start.text().catch(() => '')) || `起 run 失败 HTTP ${start.status}`)
+  if (!start.ok) throw new Error((await start.text().catch(() => '')) || t('runStartFail', { code: start.status }))
   const { runId } = await start.json()
-  if (!runId) throw new Error('引擎未返回 runId')
+  if (!runId) throw new Error(t('runNoId'))
   const res = await fetch(`${cfg.backendUrl}/agent/runs/${encodeURIComponent(runId)}/events?fromSeq=0`, { headers: h, signal })
-  if (!res.ok || !res.body) throw new Error(`订阅事件失败 HTTP ${res.status}`)
+  if (!res.ok || !res.body) throw new Error(t('runSubFail', { code: res.status }))
   const reader = res.body.getReader(), dec = new TextDecoder()
   let buf = '', lastSeq = 0, content = ''
   while (true) {
@@ -497,30 +747,32 @@ async function runAgentPlain(cfg, sessionId, message, onTick, signal, onStage) {
       const data = s.slice(5).replace(/^ /, ''); if (!data) continue
       let ev; try { ev = JSON.parse(data) } catch { continue }
       if (typeof ev.seq === 'number') { if (ev.seq <= lastSeq) continue; lastSeq = ev.seq }
-      if (ev.type === 'status') { const st = ev.payload && ev.payload.state; stage(st === 'queued' ? 12 : 20, st === 'queued' ? '排队中' : '整理中') }
+      if (ev.type === 'status') { const st = ev.payload && ev.payload.state; stage(st === 'queued' ? 12 : 20, st === 'queued' ? 'stageQueued' : 'stageRunning') }
       if (ev.type === 'token') {
         const d = ev.payload && ev.payload.delta
         if (d) { content += d; if (onTick) onTick(content) }
-        stage(Math.min(92, 26 + content.length / 90), '生成周整理中')
+        stage(Math.min(92, 26 + content.length / 90), 'stageWriting')
         continue
       }
-      if (ev.type === 'done') { stage(100, '完成'); return (ev.payload && ev.payload.content) || content }
-      if (ev.type === 'error') throw new Error((ev.payload && ev.payload.error) || '整理失败')
+      if (ev.type === 'done') { stage(100, 'stageDone'); return (ev.payload && ev.payload.content) || content }
+      if (ev.type === 'error') throw new Error((ev.payload && ev.payload.error) || t('runErr'))
     }
   }
-  throw new Error('与引擎的连接中断,未收到完成事件(可重试)')
+  throw new Error(t('runBroken'))
 }
 
 // ── AI 周整理(模型侧指令一律英文;结构化产出回 ```digest 块,插件自己落盘) ──
 function buildDigestMessage(entries, weekId) {
   const listing = (entries || []).map((m) => `[${m.ts}] ${String(m.text || '').replace(/\n/g, '\n    ')}`).join('\n\n')
+  // 指令段一律英文;只有插件钉死的那个结构标签跟界面语言走(正文语言仍跟闪念本身)。
+  const quote = t('digestQuoteLabel')
   return `Organize my fleeting notes ("memos") below into a weekly digest for week ${weekId}.
 
 Each memo starts with its ISO timestamp in [brackets]; indented lines continue the same memo.
 
 Requirements:
 - Cluster the memos by theme: one "## <theme title>" section per theme, most important theme first.
-- Under each theme: 2-5 bullet points that synthesize the ideas, then a "原句" sub-list quoting the original memo sentences verbatim, each quote followed by its timestamp in backticks (e.g. \`2026-08-03T02:11:05.000Z\`).
+- Under each theme: 2-5 bullet points that synthesize the ideas, then a "${quote}" sub-list quoting the original memo sentences verbatim, each quote followed by its timestamp in backticks (e.g. \`2026-08-03T02:11:05.000Z\`).
 - Write the digest body in the same language as the memos (do not translate them).
 - Cover every distinct idea; merge duplicates; never invent content that is not in the memos.
 - Output ONLY one fenced code block whose info string is "digest", containing the whole markdown digest, and nothing outside the block:
@@ -528,7 +780,7 @@ Requirements:
 \`\`\`digest
 ## <theme>
 - <point>
-- 原句:
+- ${quote}:
   - "<original sentence>" — \`<timestamp>\`
 \`\`\`
 
@@ -550,19 +802,21 @@ function digestCorpus(memos, today) {
 }
 
 // 模块级整理任务:关掉视图照跑,完成自动落盘 + 打开笔记。
-const digest = { running: false, pct: 0, label: '', error: '', controller: null, outPath: '' }
+// label 存**词表键**、errorKey 存插件自造错误的键(引擎回的原文只能原样留在 error):
+// 语言一变,进度条与「已取消」当场跟着变,不靠重挂视图。
+const digest = { running: false, pct: 0, label: '', error: '', errorKey: '', controller: null, outPath: '' }
 const dEmit = () => bus.emit({ type: 'digest' })
 async function runDigest() {
-  if (digest.running) { say('周整理已在进行中', { level: 'warning' }); return }
-  digest.error = ''; digest.outPath = ''
+  if (digest.running) { say(t('digestBusy'), { level: 'warning' }); return }
+  digest.error = ''; digest.errorKey = ''; digest.outPath = ''
   let corpus
   try { corpus = digestCorpus(flatten(await loadAll()).map((x) => x.m), todayKey()) }
-  catch (e) { say(`读取闪念失败:${(e && e.message) || e}`, { level: 'error' }); return }
-  if (!corpus.length) { say('还没有可整理的闪念', { level: 'warning' }); return }
+  catch (e) { say(t('readMemosFail', { msg: (e && e.message) || e }), { level: 'error' }); return }
+  if (!corpus.length) { say(t('digestNoCorpus'), { level: 'warning' }); return }
   const cfg = await getCfg()
-  if (!cfg.backendUrl || !cfg.token) { say(cfg.backendUrl ? '请先登录 Forsion' : '未连接到 Tangu 引擎', { level: 'error' }); return }
+  if (!cfg.backendUrl || !cfg.token) { say(cfg.backendUrl ? t('digestNeedLogin') : t('digestNoEngine'), { level: 'error' }); return }
   const week = isoWeekOf(todayKey())
-  digest.running = true; digest.pct = 4; digest.label = '准备语料'; digest.controller = new AbortController()
+  digest.running = true; digest.pct = 4; digest.label = 'stagePrepare'; digest.controller = new AbortController()
   dEmit()
   try {
     const msg = buildDigestMessage(corpus, week)
@@ -570,22 +824,26 @@ async function runDigest() {
       digest.pct = Math.max(digest.pct, pct); if (label) digest.label = label; dEmit()
     })
     const body = parseDigest(out) || out
-    if (!String(body).trim()) throw new Error('模型没有返回内容')
+    if (!String(body).trim()) throw new Error(t('digestEmptyOut'))
+    // 产物路径固定不随语言变(切语言不该把旧周整理藏起来)
     const p = `${digestDir()}/${week}-周整理.md`
-    const head = `> 由「闪念盒」AI 周整理生成 · ${todayKey()} · 覆盖 ${corpus.length} 条闪念\n\n`
+    const head = `${t('digestHead', { date: todayKey(), c: nMemos(corpus.length) })}\n\n`
     await ctx.app.writeFile(p, head + String(body).trim() + '\n')
     digest.outPath = p
     ctx.activity?.log('digest', { week, count: corpus.length })
-    say(`周整理完成:${week}(已存入 整理/)`, { level: 'success' })
+    say(t('digestOk', { week, dir: digestDir() }), { level: 'success' })
     if (ctx.app.openFile) ctx.app.openFile(p)
   } catch (e) {
     const aborted = digest.controller && digest.controller.signal.aborted
-    digest.error = aborted ? '已取消' : ((e && e.message) || String(e))
-    if (!aborted) say(`周整理失败:${digest.error}`, { level: 'error' })
+    digest.errorKey = aborted ? 'digestCanceled' : ''
+    digest.error = aborted ? '' : ((e && e.message) || String(e))
+    if (!aborted) say(t('digestFail', { msg: digest.error }), { level: 'error' })
   } finally {
     digest.running = false; digest.controller = null; dEmit()
   }
 }
+/** 整理面板要显示的错误文本(自造错误随语言走,引擎原文原样)。 */
+const digestErrText = () => (digest.errorKey ? t(digest.errorKey) : digest.error)
 
 // ── 语音速记(照 useVoiceInput 链路;桥缺席按钮不渲染;流/AudioContext 必收) ──
 const rec = { mr: null, stream: null, active: false, busy: false, canceled: false, t0: 0 }
@@ -609,7 +867,7 @@ async function blobToWav16k(blob) {
   const pcm = (await off.startRendering()).getChannelData(0)
   let peak = 0
   for (let i = 0; i < pcm.length; i++) { const a = Math.abs(pcm[i]); if (a > peak) peak = a }
-  if (peak < 0.005) throw new Error('没采集到声音(输入电平≈0):检查系统输入设备是否选对、麦克风没被静音')
+  if (peak < 0.005) throw new Error(t('recNoAudio'))
   const n = pcm.length
   const buf = new ArrayBuffer(44 + n * 2)
   const dv = new DataView(buf)
@@ -632,9 +890,9 @@ async function startRec(onDone, onErr, onState) {
   let stream
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }) }
   catch (e) {
-    onErr(e && e.name === 'NotAllowedError' ? '麦克风权限被拒绝(打开 系统设置 › 隐私与安全 › 麦克风,允许本 App)'
-      : e && e.name === 'NotFoundError' ? '没检测到麦克风设备'
-      : `麦克风打不开:${(e && (e.name || e.message)) || e}`)
+    onErr(e && e.name === 'NotAllowedError' ? t('micDenied')
+      : e && e.name === 'NotFoundError' ? t('micNone')
+      : t('micOpenFail', { msg: (e && (e.name || e.message)) || e }))
     return
   }
   const chunks = []
@@ -655,7 +913,7 @@ async function startRec(onDone, onErr, onState) {
         const audioBase64 = await blobToWav16k(new Blob(chunks, { type: mr.mimeType || 'audio/webm' }))
         const text = await window.tangu.transcribeAudio({ audioBase64, mime: 'audio/wav' })
         if (text && String(text).trim()) onDone(String(text).trim())
-        else onErr('没听清,再试一次')
+        else onErr(t('recNotHeard'))
       } catch (e) { onErr((e && e.message) || String(e)) }
       finally { rec.busy = false; onState() }
     }
@@ -663,7 +921,7 @@ async function startRec(onDone, onErr, onState) {
   } catch (e) {
     try { stream.getTracks().forEach((t) => t.stop()) } catch { /* ignore */ }
     rec.mr = null; rec.stream = null; rec.active = false
-    onErr(`录音器启动失败:${(e && (e.name || e.message)) || e}`)
+    onErr(t('recStartFail', { msg: (e && (e.name || e.message)) || e }))
     onState()
     return
   }
@@ -878,14 +1136,20 @@ function mountMemos(el) {
   let loadError = ''
   let filterTag = '', filterDay = '', searchQ = '', showArch = false
   let editingTs = ''
+  // 编辑框里**还没保存**的草稿。整树重画(切语言 / 总线 added / 过滤)会把编辑框整个换成新元素,
+  // 若那时回读磁盘原文 `m.text`,用户正在补的一大段当场消失 —— 闪念没有回收站,重画不许吃字。
+  // 与 editingTs 同生命周期:进编辑/取消/保存都走 endEdit() 一处清零(null = 尚未改动 → 用 m.text)。
+  let editDraft = null
+  const endEdit = () => { editingTs = ''; editDraft = null }
 
   // ── 骨架 ──
   const head = h('div', 'mf-head')
   const stats = h('span', 'mf-stats', '')
-  const btnDigest = mkBtn('AI 周整理', 'sm', () => { void runDigest() })
-  const btnRebuild = mkBtn('重建缓存', 'sm', () => { void doRebuild() })
-  const btnArch = mkBtn('显示归档', 'sm', () => { showArch = !showArch; btnArch.className = `mf-btn sm${showArch ? ' on' : ''}`; renderList() })
-  head.appendChild(h('span', 'mf-title', '闪念盒'))
+  const btnDigest = mkBtn('', 'sm', () => { void runDigest() })
+  const btnRebuild = mkBtn('', 'sm', () => { void doRebuild() })
+  const btnArch = mkBtn('', 'sm', () => { showArch = !showArch; btnArch.className = `mf-btn sm${showArch ? ' on' : ''}`; renderList() })
+  const titleEl = h('span', 'mf-title', '')
+  head.appendChild(titleEl)
   head.appendChild(stats)
   head.appendChild(h('span', 'mf-flex1'))
   head.appendChild(btnDigest); head.appendChild(btnRebuild); head.appendChild(btnArch)
@@ -896,7 +1160,6 @@ function mountMemos(el) {
   // ── 输入区 ──
   const inputCard = h('div', 'mf-card')
   const ta = h('textarea', 'mf-ta')
-  ta.setAttribute('placeholder', '现在在想什么?Enter 发送,Shift+Enter 换行,# 打标签')
   ta.setAttribute('rows', '2')
   const autoGrow = () => { if (typeof ta.scrollHeight === 'number' && ta.style) { ta.style.height = 'auto'; ta.style.height = Math.min(220, ta.scrollHeight) + 'px' } }
   ta.addEventListener('input', autoGrow)
@@ -910,20 +1173,23 @@ function mountMemos(el) {
   const toolRow = h('div', 'mf-row')
   const chipsBox = h('div', 'mf-row')
   const vMsg = h('div', 'mf-vmsg', '')
-  const sendBtn = mkBtn('记下', 'primary', () => { void doSend() })
+  const sendBtn = mkBtn('', 'primary', () => { void doSend() })
   toolRow.appendChild(chipsBox)
   toolRow.appendChild(h('span', 'mf-flex1'))
   let voiceBtn = null
+  let syncVoice = () => {}
   if (voiceAvailable()) {
-    voiceBtn = mkBtn('🎙 语音', 'mf-voice sm', null)
+    voiceBtn = mkBtn('', 'mf-voice sm', null)
     voiceBtn.setAttribute('data-voice', '1')
-    voiceBtn.setAttribute('title', '按住说话,或点击开始 / 再点结束')
     const syncVoiceUI = () => {
-      if (rec.busy) { voiceBtn.textContent = '⋯ 转写中'; voiceBtn.disabled = true; return }
+      voiceBtn.setAttribute('title', t('voiceHint'))
+      if (rec.busy) { voiceBtn.textContent = t('btnVoiceBusy'); voiceBtn.disabled = true; return }
       voiceBtn.disabled = false
-      if (rec.active) { voiceBtn.textContent = '● 结束录音'; voiceBtn.className = 'mf-btn mf-voice sm rec' }
-      else { voiceBtn.textContent = '🎙 语音'; voiceBtn.className = 'mf-btn mf-voice sm' }
+      if (rec.active) { voiceBtn.textContent = t('btnVoiceStop'); voiceBtn.className = 'mf-btn mf-voice sm rec' }
+      else { voiceBtn.textContent = t('btnVoice'); voiceBtn.className = 'mf-btn mf-voice sm' }
     }
+    syncVoice = syncVoiceUI
+    syncVoiceUI()
     const onDone = (text) => {
       vMsg.textContent = ''
       ta.value = ta.value && ta.value.replace(/\s+$/, '') ? `${ta.value.replace(/\s+$/, '')} ${text}` : text
@@ -958,7 +1224,6 @@ function mountMemos(el) {
   // ── 筛选行 + 热力图 ──
   const filterRow = h('div', 'mf-row')
   const searchEl = h('input', 'mf-input')
-  searchEl.setAttribute('placeholder', '搜索闪念…')
   searchEl.addEventListener('input', () => { searchQ = String(searchEl.value || ''); renderList() })
   const activeChips = h('div', 'mf-row')
   filterRow.appendChild(searchEl)
@@ -986,7 +1251,7 @@ function mountMemos(el) {
     try { store = await loadAll() } catch (e) { loadError = (e && e.message) || String(e) }
     loading = false
     const failed = store.failedMonths || []
-    if (failed.length) say(`有 ${failed.length} 个月文件读取失败(${failed.join('、')}),时间线暂缺这些月份;写入防线仍在`, { level: 'warning' })
+    if (failed.length) say(t('monthsFailed', { c: nMonthFiles(failed.length), list: joinList(failed) }), { level: 'warning' })
     renderAll()
   }
   // 视图变更走同一条写队列,与并发 addMemo(状态栏 quickCapture / 命令面板)排队互斥。
@@ -998,8 +1263,8 @@ function mountMemos(el) {
     await enqueueWrite(async () => {
       let disk
       try { disk = await readMonthRaw(ym) }
-      catch { throw new Error(`读取 ${ym} 月文件失败,已取消本次修改以防整月覆盖,请稍后重试`) }
-      if (disk == null) throw new Error(`${ym} 月文件不存在或暂不可读,已取消本次修改;若确认月文件已删除,请点「重建缓存」收编现状`)
+      catch { throw new Error(t('editCanceled', { ym })) }
+      if (disk == null) throw new Error(t('editCanceledGone', { ym }))
       const arr = disk
       const before = cacheFromMemos(arr)
       apply(arr)
@@ -1031,14 +1296,14 @@ function mountMemos(el) {
     } catch (e) {
       Object.assign(m, prev) // 拒改回滚:UI 与磁盘保持一致,不留「看着改成了其实没落盘」的假象
       renderAll()
-      say(`保存失败:${(e && e.message) || e}`, { level: 'error' })
+      say(t('saveFail', { msg: (e && e.message) || e }), { level: 'error' })
     }
   }
   async function deleteMemo(ym, m) {
     // y 确认是删除契约的一部分:没有 prompt 的宿主宁可不删,绝不静默单击即毁
-    if (!ctx.app.prompt) { say('当前宿主不支持确认弹框,请改用「归档」', { level: 'warning' }); return }
+    if (!ctx.app.prompt) { say(t('deleteNoPrompt'), { level: 'warning' }); return }
     let ok
-    try { ok = await ctx.app.prompt('输入 y 确认删除这条闪念(不可恢复)', '') } catch { return }
+    try { ok = await ctx.app.prompt(t('deleteConfirm'), '') } catch { return }
     if (ok == null || String(ok).trim().toLowerCase() !== 'y') return
     const prevArr = store.get(ym) || []
     try {
@@ -1047,12 +1312,12 @@ function mountMemos(el) {
         const i = arr.findIndex((y) => y.ts === m.ts)
         if (i >= 0) arr.splice(i, 1)
       })
-      say('已删除', { level: 'success' })
+      say(t('deleted'), { level: 'success' })
       renderAll()
     } catch (e) {
       store.set(ym, prevArr) // 拒改回滚:磁盘没删成,画面也不能装删了
       renderAll()
-      say(`删除失败:${(e && e.message) || e}`, { level: 'error' })
+      say(t('deleteFail', { msg: (e && e.message) || e }), { level: 'error' })
     }
   }
   async function toNote(ym, m) {
@@ -1064,13 +1329,13 @@ function mountMemos(el) {
         const x = arr.find((y) => y.ts === m.ts)
         if (x) x.archived = true
       })
-      say('已转为笔记(原条已归档)', { level: 'success' })
+      say(t('toNoteOk'), { level: 'success' })
       if (ctx.app.openFile) ctx.app.openFile(p)
       renderAll()
     } catch (e) {
       m.archived = wasArchived // 归档标没落盘就不装归档了(笔记文件若已写出则保留)
       renderAll()
-      say(`转笔记失败:${(e && e.message) || e}`, { level: 'error' })
+      say(t('toNoteFail', { msg: (e && e.message) || e }), { level: 'error' })
     }
   }
   let sending = false // Enter 通道重入闸:双击 Enter / Enter+按钮同击只落一条
@@ -1086,7 +1351,7 @@ function mountMemos(el) {
       autoGrow()
       await reloadMonth(monthKeyOf(Date.now()))
       renderAll()
-    } catch (e) { say(`保存失败:${(e && e.message) || e}`, { level: 'error' }) }
+    } catch (e) { say(t('saveFail', { msg: (e && e.message) || e }), { level: 'error' }) }
     finally { sending = false; sendBtn.disabled = false }
   }
   async function doRebuild() {
@@ -1094,20 +1359,20 @@ function mountMemos(el) {
       const cur = firstMonth() || monthKeyOf(Date.now())
       let ym = cur
       if (ctx.app.prompt) {
-        const v = await ctx.app.prompt('重建缓存:从哪个月开始扫描(YYYY-MM)', cur)
+        const v = await ctx.app.prompt(t('rebuildPrompt'), cur)
         if (v == null) return
         ym = String(v).trim() || cur
       }
-      if (!YM_RE.test(ym)) { say('月份格式应为 YYYY-MM', { level: 'warning' }); return }
+      if (!YM_RE.test(ym)) { say(t('rebuildBadMonth'), { level: 'warning' }); return }
       if (ym < cur) setFirstMonth(ym)
       // 用户主动重建 = 声明「以磁盘现状为准」:清掉写前防线的会话记忆,免得删过月文件后被拒写死锁
       monthKnownCounts.clear()
       monthPreambles.clear()
       await loadStore()
       const c = await rebuildCacheFromStore(store)
-      say(`缓存已重建:共 ${c.total} 条`, { level: 'success' })
+      say(t('rebuildOk', { c: nMemos(c.total) }), { level: 'success' })
       renderAll()
-    } catch (e) { say(`重建失败:${(e && e.message) || e}`, { level: 'error' }) }
+    } catch (e) { say(t('rebuildFail', { msg: (e && e.message) || e }), { level: 'error' }) }
   }
 
   // ── 渲染 ──
@@ -1116,7 +1381,18 @@ function mountMemos(el) {
     let total = 0
     for (const k of Object.keys(d)) total += d[k]
     const s = streakOf(d, todayKey())
-    stats.textContent = total ? `共 ${total} 条 · 连续 ${s} 天` : ''
+    stats.textContent = total ? t('stats', { c: nMemos(total), d: s }) : ''
+  }
+  /** 静态骨架上的文案(标题 / 按钮 / placeholder):语言一变就地重写,不重挂视图。 */
+  function renderChrome() {
+    titleEl.textContent = t('appName')
+    btnDigest.textContent = t('btnDigest')
+    btnRebuild.textContent = t('btnRebuild')
+    btnArch.textContent = t('btnShowArch')
+    sendBtn.textContent = t('btnSend')
+    ta.setAttribute('placeholder', t('inputPlaceholder'))
+    searchEl.setAttribute('placeholder', t('searchPlaceholder'))
+    syncVoice() // 录音中也安全:它按 rec 状态重算,不会把「结束录音」写回「语音」
   }
   function renderChips() {
     chipsBox.textContent = ''
@@ -1132,11 +1408,11 @@ function mountMemos(el) {
   }
   function renderDigestBox() {
     digestBox.textContent = ''
-    if (!digest.running && !digest.error) return
+    if (!digest.running && !digest.error && !digest.errorKey) return
     const card = h('div', 'mf-card')
     if (digest.running) {
       const headRow = h('div', 'mf-prog-head')
-      headRow.appendChild(h('span', null, `AI 周整理:${digest.label}`))
+      headRow.appendChild(h('span', null, t('digestProgress', { label: digest.label ? t(digest.label) : '' })))
       headRow.appendChild(h('span', null, `${Math.round(digest.pct)}%`))
       const track = h('div', 'mf-prog-track')
       const fill = h('div', 'mf-prog-fill')
@@ -1144,27 +1420,27 @@ function mountMemos(el) {
       track.appendChild(fill)
       const row = h('div', 'mf-row')
       row.appendChild(h('span', 'mf-flex1'))
-      row.appendChild(mkBtn('取消', 'sm', () => { if (digest.controller) digest.controller.abort() }))
+      row.appendChild(mkBtn(t('btnCancel'), 'sm', () => { if (digest.controller) digest.controller.abort() }))
       card.appendChild(headRow); card.appendChild(track); card.appendChild(row)
     } else {
       const row = h('div', 'mf-row')
-      row.appendChild(h('span', 'mf-err', `周整理失败:${digest.error}`))
+      row.appendChild(h('span', 'mf-err', t('digestFail', { msg: digestErrText() })))
       row.appendChild(h('span', 'mf-flex1'))
-      row.appendChild(mkBtn('重试', 'sm', () => { digest.error = ''; void runDigest() }))
-      row.appendChild(mkBtn('知道了', 'sm', () => { digest.error = ''; renderDigestBox() }))
+      row.appendChild(mkBtn(t('btnRetry'), 'sm', () => { digest.error = ''; digest.errorKey = ''; void runDigest() }))
+      row.appendChild(mkBtn(t('btnGotIt'), 'sm', () => { digest.error = ''; digest.errorKey = ''; renderDigestBox() }))
       card.appendChild(row)
     }
     digestBox.appendChild(card)
   }
   function currentPicks() {
-    const t = todayKey()
-    if (reviewState.day !== t) { reviewState.day = t; reviewState.done = new Set(); reviewState.picks = null }
+    const today = todayKey() // 不叫 t:与词表 helper t() 重名
+    if (reviewState.day !== today) { reviewState.day = today; reviewState.done = new Set(); reviewState.picks = null }
     const n = reviewCountSetting()
     if (!n) return []
     const all = flatAll().map((x) => x.m)
     if (!reviewState.picks) {
       if (loading) return [] // 数据没到位不冻结,免得把空集钉成「今天没得回顾」
-      reviewState.picks = pickReview(reviewEligible(all, t), seedOfDay(t), n).map((m) => m.ts)
+      reviewState.picks = pickReview(reviewEligible(all, today), seedOfDay(today), n).map((m) => m.ts)
     }
     // 冻结后只做过滤,不重抽:已删除的卡掉队;在时间线上被归档(而非经回顾处理)的也掉队;
     // 经回顾动作归档/转笔记的(已进 done)留在分母里,完成判定与「还剩 N/M」才不会自我延长。
@@ -1174,22 +1450,22 @@ function mountMemos(el) {
   }
   function renderReview() {
     reviewBox.textContent = ''
-    const t = todayKey()
-    if (getLS('reviewDone', '') === t) return
+    const today = todayKey() // 不叫 t:与词表 helper t() 重名
+    if (getLS('reviewDone', '') === today) return
     const picks = currentPicks()
     if (!picks.length) return
     const remain = picks.filter((p) => !reviewState.done.has(p.ts))
     if (!remain.length) return
     const card = h('div', 'mf-card')
     const headRow = h('div', 'mf-row')
-    headRow.appendChild(h('span', 'mf-label', '每日回顾'))
-    headRow.appendChild(h('span', 'mf-hint', `过去的想法再看一眼 · 还剩 ${remain.length}/${picks.length}`))
+    headRow.appendChild(h('span', 'mf-label', t('reviewLabel')))
+    headRow.appendChild(h('span', 'mf-hint', t('reviewHint', { left: remain.length, total: picks.length })))
     card.appendChild(headRow)
     const rowBox = h('div', 'mf-rcards')
     for (const p of remain) {
       const rc = h('div', 'mf-rcard')
       rc.setAttribute('data-review', '1')
-      rc.appendChild(h('div', 'mf-rdate', dayKeyOfIso(p.ts)))
+      rc.appendChild(h('div', 'mf-rdate', fmtDay(dayKeyOfIso(p.ts))))
       const tx = h('div', 'mf-rtext')
       renderMemoText(tx, p.text, null)
       rc.appendChild(tx)
@@ -1200,16 +1476,16 @@ function mountMemos(el) {
         // 处理动作可能让条目失去回顾资格(归档/转笔记)——picksNow 变空同样算「全部处理完」
         const picksNow = currentPicks()
         if (!picksNow.length || picksNow.every((x) => reviewState.done.has(x.ts))) {
-          setLS('reviewDone', t)
+          setLS('reviewDone', today)
           ctx.activity?.log('review_done')
-          say('今日回顾完成 ✓', { level: 'success' })
+          say(t('reviewDone'), { level: 'success' })
         }
         renderAll()
       }
       const home = homeOf(p)
-      acts.appendChild(mkBtn('跳过', 'sm', done(null)))
-      acts.appendChild(mkBtn('转笔记', 'sm', done(() => (home ? toNote(home, p) : null))))
-      acts.appendChild(mkBtn('归档', 'sm', done(() => (home ? patchMemo(home, p, { archived: true }) : null))))
+      acts.appendChild(mkBtn(t('actSkip'), 'sm', done(null)))
+      acts.appendChild(mkBtn(t('actToNote'), 'sm', done(() => (home ? toNote(home, p) : null))))
+      acts.appendChild(mkBtn(t('actArchive'), 'sm', done(() => (home ? patchMemo(home, p, { archived: true }) : null))))
       rc.appendChild(acts)
       rowBox.appendChild(rc)
     }
@@ -1227,8 +1503,8 @@ function mountMemos(el) {
       c.addEventListener('click', clear)
       activeChips.appendChild(c)
     }
-    if (filterTag) add(`#${filterTag}`, () => { filterTag = ''; renderAll() })
-    if (filterDay) add(filterDay, () => { filterDay = ''; renderAll() })
+    if (filterTag) add(`#${filterTag}`, () => { filterTag = ''; renderAll() }) // 标签名是用户数据,不翻
+    if (filterDay) add(fmtDay(filterDay), () => { filterDay = ''; renderAll() })
   }
   function renderHeat() {
     heatBox.textContent = ''
@@ -1242,7 +1518,7 @@ function mountMemos(el) {
       const n = days[key] || 0
       const lv = n <= 0 ? 0 : n === 1 ? 1 : n <= 3 ? 2 : n <= 6 ? 3 : 4
       const cell = h('span', `mf-cell lv${lv}${filterDay === key ? ' sel' : ''}`)
-      cell.setAttribute('title', `${key} · ${n} 条`)
+      cell.setAttribute('title', t('heatCell', { day: key, c: nMemos(n) })) // day 用 ISO 原键:两语言通读,且是数据键
       if (serial > tSer) cell.className = 'mf-cell future'
       else cell.addEventListener('click', () => { filterDay = filterDay === key ? '' : key; renderAll() })
       grid.appendChild(cell)
@@ -1254,30 +1530,31 @@ function mountMemos(el) {
     row.setAttribute('data-memo', '1')
     const top = h('div', 'mf-mtop')
     top.appendChild(h('span', null, timeOfIso(m.ts)))
-    if (m.pinned) top.appendChild(h('span', 'mf-flag', '置顶'))
-    if (m.archived) top.appendChild(h('span', 'mf-flag', '已归档'))
+    if (m.pinned) top.appendChild(h('span', 'mf-flag', t('flagPinned')))
+    if (m.archived) top.appendChild(h('span', 'mf-flag', t('flagArchived')))
     const acts = h('span', 'mf-acts')
     const ab = (label, fn, danger) => {
       const b = h('button', `mf-abtn${danger ? ' danger' : ''}`, label)
       b.addEventListener('click', fn)
       acts.appendChild(b)
     }
-    ab('编辑', () => { editingTs = m.ts; renderList() })
-    ab(m.pinned ? '取消置顶' : '置顶', () => { void patchMemo(ym, m, { pinned: !m.pinned }) })
-    ab(m.archived ? '恢复' : '归档', () => { void patchMemo(ym, m, { archived: !m.archived }) })
-    ab('转笔记', () => { void toNote(ym, m) })
-    ab('删除', () => { void deleteMemo(ym, m) }, true)
+    ab(t('actEdit'), () => { endEdit(); editingTs = m.ts; renderList() }) // 换一条编辑 → 上一条的草稿作废
+    ab(m.pinned ? t('actUnpin') : t('actPin'), () => { void patchMemo(ym, m, { pinned: !m.pinned }) })
+    ab(m.archived ? t('actRestore') : t('actArchive'), () => { void patchMemo(ym, m, { archived: !m.archived }) })
+    ab(t('actToNote'), () => { void toNote(ym, m) })
+    ab(t('actDelete'), () => { void deleteMemo(ym, m) }, true)
     top.appendChild(acts)
     row.appendChild(top)
     if (editingTs === m.ts) {
       const ed = h('textarea', 'mf-ta')
-      ed.value = m.text
+      ed.value = editDraft != null ? editDraft : m.text // 有草稿用草稿(空串也算草稿:用户可能刚全选删掉)
+      ed.addEventListener('input', () => { editDraft = String(ed.value == null ? '' : ed.value) })
       const r2 = h('div', 'mf-row')
       r2.appendChild(h('span', 'mf-flex1'))
-      r2.appendChild(mkBtn('取消', 'sm', () => { editingTs = ''; renderList() }))
-      r2.appendChild(mkBtn('保存', 'primary sm', () => {
+      r2.appendChild(mkBtn(t('btnCancel'), 'sm', () => { endEdit(); renderList() }))
+      r2.appendChild(mkBtn(t('btnSave'), 'primary sm', () => {
         const nv = String(ed.value == null ? '' : ed.value).replace(/\s+$/, '')
-        editingTs = ''
+        endEdit()
         if (nv.trim() && nv !== m.text) { void patchMemo(ym, m, { text: nv }) } else renderList()
       }))
       row.appendChild(ed)
@@ -1291,20 +1568,20 @@ function mountMemos(el) {
   }
   function renderList() {
     listBox.textContent = ''
-    if (loading) { listBox.appendChild(h('div', 'mf-empty', '加载中…')); return }
+    if (loading) { listBox.appendChild(h('div', 'mf-empty', t('loading'))); return }
     if (loadError) {
       const e = h('div', 'mf-empty')
-      e.appendChild(h('b', null, '读取闪念失败'))
+      e.appendChild(h('b', null, t('loadFail')))
       e.appendChild(h('div', 'mf-err', loadError))
-      e.appendChild(mkBtn('重试', 'sm', () => { void loadStore() }))
+      e.appendChild(mkBtn(t('btnRetry'), 'sm', () => { void loadStore() }))
       listBox.appendChild(e)
       return
     }
     const flat = flatAll()
     if (!flat.length) {
       const e = h('div', 'mf-empty')
-      e.appendChild(h('b', null, '还没有闪念'))
-      e.appendChild(h('div', null, '上面输入框随手记一条;Enter 发送。也可以用状态栏「✎ 闪念」或命令面板「闪念盒:快速记一条」。'))
+      e.appendChild(h('b', null, t('emptyTitle')))
+      e.appendChild(h('div', null, t('emptyHint')))
       listBox.appendChild(e)
       return
     }
@@ -1314,13 +1591,13 @@ function mountMemos(el) {
     if (searchQ.trim()) { const q = searchQ.trim().toLowerCase(); items = items.filter((it) => it.m.text.toLowerCase().includes(q)) }
     items.sort((a, b) => (a.m.ts < b.m.ts ? 1 : a.m.ts > b.m.ts ? -1 : 0))
     if (!items.length) {
-      const e = h('div', 'mf-empty', '没有匹配的闪念')
+      const e = h('div', 'mf-empty', t('noMatch'))
       listBox.appendChild(e)
       return
     }
     const pinned = items.filter((it) => it.m.pinned && !it.m.archived)
     if (pinned.length) {
-      listBox.appendChild(h('div', 'mf-day', `📌 置顶 · ${pinned.length} 条`))
+      listBox.appendChild(h('div', 'mf-day', t('pinnedGroup', { n: pinned.length })))
       for (const it of pinned) listBox.appendChild(memoRow(it.ym, it.m))
     }
     const tKey = todayKey(), yKey = shiftDays(tKey, -1)
@@ -1330,15 +1607,21 @@ function mountMemos(el) {
       const k = dayKeyOfIso(it.m.ts)
       if (k !== curDay) {
         curDay = k
-        const label = k === tKey ? '今天' : k === yKey ? '昨天' : k
+        const label = k === tKey ? t('dayToday') : k === yKey ? t('dayYesterday') : fmtDay(k)
         listBox.appendChild(h('div', 'mf-day', label))
       }
       listBox.appendChild(memoRow(it.ym, it.m))
     }
   }
   function renderAll() {
-    renderStats(); renderChips(); renderDigestBox(); renderReview(); renderFilter(); renderHeat(); renderList()
+    renderChrome(); renderStats(); renderChips(); renderDigestBox(); renderReview(); renderFilter(); renderHeat(); renderList()
   }
+  // 语言切换:宿主只广播变化,初值自己 getLocale()。**不重挂视图**——就地重画整屏,
+  // 输入框里没发出去的草稿、编辑框里没保存的字、正在录的音、跑着的周整理都不能被语言切换打断。
+  // 前两样各有各的机制:输入框 ta / 搜索框是 mount 时建的常驻元素(重画只改 placeholder);
+  // 编辑框每次 renderList 都新建,靠 editDraft 回填 —— 少了它,切个语言就把用户正写的一段吃掉。
+  const offLocale = ctx.subscribeLocale?.(() => { renderAll() })
+  renderChrome()
 
   // ── 总线 + 启动 ──
   const offBus = bus.on((e) => {
@@ -1358,24 +1641,32 @@ function mountMemos(el) {
   }
   void ensureCacheFile().then(loadStore)
 
-  return () => { offTheme(); offBus(); if (rec.active || rec.busy) stopRecHard() }
+  return () => { offTheme(); offBus(); if (offLocale) offLocale(); if (rec.active || rec.busy) stopRecHard() }
 }
 
 // ── 注册(id 全按 SPEC 钉死;07-18 后 API 一律可选链) ─────────────────────────
-ctx.registerView?.({ id: 'memos', title: '闪念盒', mount: mountMemos, singleton: true })
+// 贡献点的标题是**单字符串**、宿主不做运行时重解析:这里取的是**注册当时**的语言,
+// 语言切换后命令面板 / 设置页 / 视图 tab 标题要等重启才跟上(宿主侧已知缺口,见 README)。
+// 绝不为它做「语言变了就 teardown 重注册」——那会打断录音、写队列与已打开的视图。
+// keywords 反而恒双语:搜索面不该因为界面语言而搜不到。
+ctx.registerView?.({ id: 'memos', title: t('appName'), mount: mountMemos, singleton: true })
 ctx.registerCommand({
-  id: 'memoflow-open', title: '闪念盒:打开', keywords: 'memoflow 闪念 速记 memo flomo 笔记 灵感',
-  run: () => { if (ctx.openView) ctx.openView('memos'); else say('宿主版本过旧,不支持工作台视图', { level: 'warning' }) },
+  id: 'memoflow-open', title: t('cmdOpen'), keywords: 'memoflow 闪念 速记 memo flomo 笔记 灵感 capture note idea',
+  run: () => { if (ctx.openView) ctx.openView('memos'); else say(t('hostTooOld'), { level: 'warning' }) },
 })
 ctx.registerCommand({
-  id: 'memoflow-capture', title: '闪念盒:快速记一条', keywords: 'memoflow capture 闪念 快速 速记 记录',
+  id: 'memoflow-capture', title: t('cmdCapture'), keywords: 'memoflow capture 闪念 快速 速记 记录 quick memo jot',
   run: () => { void quickCapture() },
 })
 ctx.registerCommand({
-  id: 'memoflow-digest', title: '闪念盒:AI 周整理', keywords: 'memoflow digest 周整理 整理 weekly 回顾',
+  id: 'memoflow-digest', title: t('cmdDigest'), keywords: 'memoflow digest 周整理 整理 weekly 回顾 summary review',
   run: () => { if (ctx.openView) ctx.openView('memos'); void runDigest() },
 })
-const sbHandle = ctx.registerStatusItem?.({ id: 'quick', side: 'right', text: '✎ 闪念', title: '快速记一条闪念', onClick: () => { void quickCapture() } })
+const sbHandle = ctx.registerStatusItem?.({ id: 'quick', side: 'right', text: t('statusText'), title: t('statusTitle'), onClick: () => { void quickCapture() } })
+// 状态栏项是少数**能**运行时改文案的宿主面(handle.update):它跟着语言走,不必等重启。
+const offLocaleSb = ctx.subscribeLocale?.(() => {
+  try { sbHandle?.update?.({ text: t('statusText'), title: t('statusTitle') }) } catch { /* 旧宿主 handle 无 update */ }
+})
 
 // ── check.mjs 测试钩子 ──────────────────────────────────────────────────────
 if (globalThis.__MEMOFLOW_TEST__) {
@@ -1385,10 +1676,12 @@ if (globalThis.__MEMOFLOW_TEST__) {
     cacheFromMemos, bumpCacheObj, streakOf, buildDigestMessage, parseDigest, digestCorpus,
     safeHref, sanitizeFileName, renderMemoText, voiceAvailable, addMemo, quickCapture, memoToNote,
     loadAll, rebuildCacheFromStore, onColorOf, readableOn, contrast, wfRoot, timeOfIso,
+    MSG, L, t, fmtDay, nMemos, nMonthFiles, joinList,
   })
 }
 
 return () => {
+  if (offLocaleSb) offLocaleSb()
   if (sbHandle && sbHandle.dispose) sbHandle.dispose()
   if (digest.controller) digest.controller.abort()
   stopRecHard()

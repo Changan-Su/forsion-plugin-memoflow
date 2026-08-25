@@ -1,9 +1,11 @@
 {
   "id": "memoflow",
   "name": "闪念盒",
-  "version": "1.0.0",
+  "nameEn": "MemoFlow",
+  "version": "1.2.0",
   "apiVersion": 1,
   "description": "flomo 式低摩擦速记:文字或语音随手记一条,自动按月落成你笔记库里的纯 Markdown 文件(<工作文件夹>/YYYY-MM.md,# 标签行内直打),时间线 / 标签过滤 / 12 周热力图一目了然;每天从 7 天前更早的旧闪念里抽几条「每日回顾」再浮现,单条可一键转正式笔记;「AI 周整理」把近期闪念文本交给你自己的 Tangu 引擎按主题聚类成周报,产物写回 整理/ 文件夹。数据流向:闪念全部存在本地笔记库,语音走 Forsion 桌面自带的语音识别链路(不保存音频原文件),AI 周整理只把闪念文本发给你登录的 Forsion 后端,不经任何第三方服务。",
+  "descriptionEn": "Low-friction capture, flomo style: jot a thought by typing or by voice and it lands as plain Markdown in your own vault, one file per month (<work folder>/YYYY-MM.md, with # tags written inline). A timeline, tag filters and a 12-week heatmap keep it all in view. Every day a few older memos (7+ days back) resurface as Daily Review cards, and any single memo can be turned into a real note in one click. AI Weekly Digest hands your recent memos to your own Tangu engine, which clusters them by theme into a weekly write-up saved back into the 整理/ folder. Where the data goes: memos never leave your local vault; voice goes through Forsion Desktop's own speech pipeline (no audio file is kept); AI Weekly Digest sends memo text only to the Forsion backend you are signed in to, never to a third party.",
   "main": "main.js",
   "onboarding": {
     "intro": "闪念盒 = 想到就记、记了会再见到:速记进月文件,每天回顾几条旧想法,攒够一周让 Tangu 帮你按主题整理。",
@@ -30,9 +32,38 @@
       },
       {
         "title": "数据在哪",
-        "description": "全部在你的笔记库:月文件 <工作文件夹>/YYYY-MM.md(纯 Markdown,可直接当笔记打开),派生统计 .memoflow-cache.json(可随时点「重建缓存」按钮从月文件重算),转笔记与周整理产物在 整理/ 子文件夹。"
+        "description": "全部在你的笔记库:月文件 <工作文件夹>/YYYY-MM.md(纯 Markdown,可直接当笔记打开),派生统计 .memoflow-cache.json(可随时点「重建缓存」按钮从月文件重算),转笔记与周整理产物在 整理/ 子文件夹。产物路径固定,不随界面语言变。"
       }
     ],
+    "en": {
+      "intro": "MemoFlow = capture the thought, then meet it again: memos land in a monthly file, a few older ones resurface every day, and once a week Tangu clusters them by theme for you.",
+      "steps": [
+        {
+          "title": "Capture",
+          "description": "Open the view with the \"MemoFlow: Open\" command. Enter sends, Shift+Enter adds a line, # writes a tag inline (e.g. #product). Don't want the view? Click \"✎ Memo\" in the status bar or run \"MemoFlow: Quick Capture\" — one line of input goes straight into the vault."
+        },
+        {
+          "title": "Voice capture",
+          "description": "The 🎙 button in the composer: hold to talk and release to finish, or click once to start and again to stop. Transcription runs through Forsion Desktop's own speech pipeline (Settings → Voice). The text lands in the composer first so you can fix it — nothing is sent automatically, and no audio file is kept."
+        },
+        {
+          "title": "Daily Review",
+          "description": "On days when you have unarchived memos from 7+ days ago, a few review cards appear under the composer (count is a plugin setting). Handle each one with Skip / To Note / Archive; the strip folds away once they are all done. The picks stay fixed for the day and change tomorrow."
+        },
+        {
+          "title": "Find it again",
+          "description": "The timeline runs newest-first, grouped by day. Click a #tag in a memo to filter, use the search box for full-text filtering, and click a heatmap cell (last 12 weeks) to see what you wrote that day. Each memo can be edited in place, pinned, archived or deleted."
+        },
+        {
+          "title": "AI Weekly Digest",
+          "description": "Run \"MemoFlow: AI Weekly Digest\": the last 7 days of memos (or the most recent 50 if that is fewer) go to Tangu, which clusters them by theme. The result is saved to 整理/YYYY-Www-周整理.md and opened for you. Requires being signed in to Forsion."
+        },
+        {
+          "title": "Where the data lives",
+          "description": "All of it is in your vault: monthly files at <work folder>/YYYY-MM.md (plain Markdown, openable as ordinary notes), derived stats in .memoflow-cache.json (the \"Rebuild Cache\" button recomputes them from the monthly files at any time), and notes plus digests in the 整理/ subfolder. Those paths are fixed — they do not change with the interface language."
+        }
+      ]
+    },
     "settings": true
   }
 }

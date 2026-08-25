@@ -846,4 +846,234 @@ dispose()
   dispose3()
 }
 
-console.log('check ok — 视图/3 命令/1 设置/状态栏/成就 契约 + 月文件往返(含前言/Amadeus 块标记四形态) + 标签 + seed 回顾(同日冻结) + 缓存等式 + 跨年月序 + 删除保全 + XSS + P0 写前防线(ioFail 拒写/折叠宿主缓存证词/ensureCacheFile 不覆写/增量补丁不清证词/P0 链条闭环) + P1 变更读不到一律拒改 + 并发串行 + IME/双Enter 闸 + 语音双姿势 + MediaRecorder 抛出停流 + digest 嵌套围栏 + 转笔记不覆写 + 双旧宿主降级 全部通过')
+// ── 双语(2026-08-14 起的 ctx.getLocale / subscribeLocale) ──────────────────
+//   ① 词表两侧键集合完全相等(漏翻一条就红)
+//   ② 宿主广播语言变更后,**同一个已挂载的视图元素**就地变成英文 —— 靠「下次打开才变」不算过
+//     (这条是真机门禁 plugin-view.e2e.cjs 第 8 项在 node 里的等价预演)
+{
+  const V9 = new Map()
+  let loc = 'zh'
+  const localeSubs = new Set()
+  const fireLocale = (l) => { for (const cb of [...localeSubs]) cb(l) }
+  const reg9 = { views: [], status: [] }
+  const ctx9 = {
+    registerView: (v) => reg9.views.push(v), registerCommand() {}, registerSetting() {}, openView() {},
+    registerStatusItem: (s) => { reg9.status.push(s); return { update: (patch) => Object.assign(s, patch), dispose() {} } },
+    getLocale: () => loc,
+    subscribeLocale: (cb) => { localeSubs.add(cb); return () => localeSubs.delete(cb) },
+    app: {
+      notify() {}, openFile() {}, workFolder: () => '闪念盒', prompt: async () => null,
+      readFile: async (p) => (V9.has(p) ? V9.get(p) : null),
+      writeFile: async (p, x) => V9.set(p, String(x)),
+    },
+  }
+  globalThis.__MEMOFLOW_TEST__ = {}
+  const dispose9 = new Function('ctx', src)(ctx9)
+  const T9 = globalThis.__MEMOFLOW_TEST__
+
+  // ① 词表形态
+  A.ok(T9.MSG && T9.MSG.zh && T9.MSG.en, '应暴露 MSG 词表(zh + en)')
+  const zhKeys = Object.keys(T9.MSG.zh).sort()
+  const enKeys = Object.keys(T9.MSG.en).sort()
+  A.deepEqual(enKeys, zhKeys, '双语词表:zh 与 en 的键集合必须完全相等')
+  A.ok(zhKeys.length >= 60, `词表覆盖到位(见 ${zhKeys.length} 个键)`)
+  A.deepEqual(zhKeys.filter((k) => !String(T9.MSG.en[k] || '').trim()), [], '英文侧不许有空串占位')
+  A.deepEqual(zhKeys.filter((k) => /[一-鿿]/.test(String(T9.MSG.en[k]))), [], '英文侧不许残留中文')
+  A.deepEqual(zhKeys.filter((k) => !String(T9.MSG.zh[k] || '').trim()), [], '中文侧不许有空串占位')
+  // 占位符两侧必须同集合,否则英文串会漏渲染出 {n} 这种裸花括号
+  const holders = (s) => String(s).match(/\{[a-zA-Z]+\}/g) || []
+  A.deepEqual(
+    zhKeys.filter((k) => holders(T9.MSG.zh[k]).sort().join(',') !== holders(T9.MSG.en[k]).sort().join(',')),
+    [], '两侧占位符 {name} 集合一致',
+  )
+  A.equal(T9.L(), 'zh', 'getLocale 给 zh → L() 为 zh')
+
+  // ② 切 en:同一个挂载元素就地变英文,不重挂
+  const el9 = mkEl('div')
+  const cleanup9 = reg9.views[0].mount(el9)
+  await sleep(40)
+  const zh9 = el9.textContent
+  A.ok(zh9.includes('还没有闪念'), '默认中文:空状态文案是中文')
+  A.ok(zh9.includes('记下') && zh9.includes('重建缓存'), '默认中文:按钮文案是中文')
+  A.ok(localeSubs.size >= 1, '插件应订阅 ctx.subscribeLocale')
+  loc = 'en'
+  fireLocale('en')
+  await sleep(20)
+  const en9 = el9.textContent
+  A.ok(en9.includes('No memos yet'), '切 en 后同一挂载元素就地变英文(空状态,视图未重挂)')
+  A.ok(en9.includes('Capture') && en9.includes('Rebuild Cache') && en9.includes('AI Weekly Digest'),
+    '切 en 后静态骨架(标题/按钮)也重画成英文')
+  A.ok(!en9.includes('还没有闪念') && !en9.includes('重建缓存'), '英文界面不残留中文原串')
+  const sb9 = reg9.status[0]
+  A.ok(sb9 && !/[一-鿿]/.test(String(sb9.text)), '状态栏项能运行时更新(handle.update)→ 切 en 后不残留中文')
+  // 语言退订:视图清理退一条,插件 disposer 退干净
+  const afterMount = localeSubs.size
+  cleanup9()
+  A.equal(localeSubs.size, afterMount - 1, 'mount 清理函数退掉视图那条语言订阅')
+  dispose9()
+  A.equal(localeSubs.size, 0, '插件 disposer 退掉剩余语言订阅')
+}
+
+// ── 双语(二):zh→en→zh 回归 · 切语言不吃编辑框草稿 · 计数与列表分隔符按语言 ──────
+//   上面那块只走到「切成英文」就收工,漏掉三类洞(1.1.1 复核点名,补在这里):
+//   ① 单向漂移:切回中文必须**逐字**回到初始态,不能留下英文残渣或格式偏移;
+//   ② 编辑框是每次 renderList 新建的元素 —— 若重画时回读磁盘原文,用户没保存的补充当场消失。
+//      闪念没有回收站,而 README/CHANGELOG 明写「正在编辑的那条不会被打断」:这条断言就是那句
+//      承诺的执行面,红了说明**文档在撒谎**,不是测试太严;
+//   ③ 拼串本地化:英文句子里出现中文顿号、`1 memos` 这种复数错 —— 后者会跟着周整理抬头落进
+//      磁盘长期留着,不是「界面小瑕」。
+{
+  A.ok(!/join\('、'\)/.test(src), '列表分隔符禁硬编码中文顿号(一律走词表 listSep / joinList)')
+  const V10 = new Map()
+  V10.set('闪念盒/2026-08.md', [
+    '# 2026-08', '',
+    '### 2026-08-05T04:00:00.000Z', '原始正文', '',
+    '### 2026-08-05T05:00:00.000Z', '第二条', '',
+  ].join('\n'))
+  let loc = 'zh'
+  const subs10 = new Set()
+  const fireLocale = (l) => { loc = l; for (const cb of [...subs10]) cb(l) }
+  const reg10 = { views: [] }
+  const ctx10 = {
+    registerView: (v) => reg10.views.push(v), registerCommand() {}, registerSetting() {}, openView() {},
+    registerStatusItem: () => ({ update() {}, dispose() {} }),
+    getLocale: () => loc,
+    subscribeLocale: (cb) => { subs10.add(cb); return () => subs10.delete(cb) },
+    app: {
+      notify() {}, openFile() {}, workFolder: () => '闪念盒', prompt: async () => null,
+      readFile: async (p) => (V10.has(p) ? V10.get(p) : null),
+      writeFile: async (p, x) => V10.set(p, String(x)),
+    },
+  }
+  globalThis.__MEMOFLOW_TEST__ = {}
+  const dispose10 = new Function('ctx', src)(ctx10)
+  const T10 = globalThis.__MEMOFLOW_TEST__
+  const el10 = mkEl('div')
+  const cleanup10 = reg10.views[0].mount(el10)
+  await sleep(40)
+
+  // ① zh → en → zh 逐字回归(切回来才算走完一个来回)
+  const zhText0 = el10.textContent
+  const phOf = () => findAll(el10, (c) => c.attrs && 'placeholder' in c.attrs).map((c) => c.attrs.placeholder)
+  const ph0 = phOf()
+  A.ok(zhText0.includes('原始正文') && zhText0.includes('第二条'), '中文界面渲染出两条闪念')
+  A.ok(ph0.length >= 2, `placeholder 采到样本(见 ${ph0.length} 个)`)
+  // 裸占位符扫描:词表改了占位符名(本版 {n}→{c})却漏改某个调用点时,界面会**照常渲染**、
+  // 只是多出一个 "{c}" —— 不抛错、不变空白,靠肉眼和「英文无中文」都抓不到
+  const leakScan = (label) => {
+    const attrTxt = findAll(el10, (c) => c.attrs && ('title' in c.attrs || 'placeholder' in c.attrs))
+      .map((c) => `${c.attrs.title || ''} ${c.attrs.placeholder || ''}`).join(' ')
+    const hit = `${el10.textContent} ${attrTxt}`.match(/\{[a-zA-Z]+\}/g)
+    A.equal(hit, null, `${label}:界面上不许出现没替换掉的裸占位符(见 ${hit ? hit.join(' ') : ''})`)
+  }
+  leakScan('中文界面')
+  fireLocale('en')
+  await sleep(20)
+  A.ok(el10.textContent.includes('Capture') && !el10.textContent.includes('重建缓存'), '切 en 生效')
+  leakScan('英文界面')
+  fireLocale('zh')
+  await sleep(20)
+  A.equal(el10.textContent, zhText0, 'zh→en→zh:整棵视图逐字回到初始中文(无残渣、无单向漂移)')
+  A.deepEqual(phOf(), ph0, 'zh→en→zh:placeholder 也逐字回中文')
+
+  // ② 切语言不吃编辑框里没保存的字(整树重画 ≠ 丢草稿)
+  const rowsOf = () => byAttr(el10, 'data-memo')
+  const btnIn = (row, label) => findAll(row, (c) => c.tag === 'button' && c.textContent === label)[0]
+  const rowWith = (s) => rowsOf().find((r) => r.textContent.includes(s))
+  // 编辑中的那一行按「行内有 textarea」找:整树重画换掉元素、并发落库还会挪动行序,
+  // 拿旧引用或旧下标必然失手(输入区那个 textarea 不在 memo 行里,不会误命中)。
+  const edRow = () => rowsOf().find((r) => byTag(r, 'textarea').length > 0)
+  const edNow = () => { const r = edRow(); return r ? byTag(r, 'textarea')[0] : null }
+  A.ok(rowWith('原始正文') && rowWith('第二条'), '两条闪念各占一行')
+  btnIn(rowWith('原始正文'), '编辑').listeners.click[0]()
+  await sleep(20)
+  A.ok(edNow(), '点「编辑」后行内出现编辑框')
+  A.equal(edNow().value, '原始正文', '编辑框初值 = 磁盘原文')
+  const DRAFT = '原始正文 —— 我正在写的一大段还没保存的补充'
+  edNow().value = DRAFT
+  edNow().listeners.input[0]()
+  fireLocale('en')
+  await sleep(20)
+  A.ok(edNow(), '切语言后编辑框还开着(编辑态不被关掉)')
+  A.equal(edNow().value, DRAFT, '切语言不吃编辑框草稿(README/CHANGELOG「正在编辑的那条不会被打断」的执行面)')
+  // 总线重画(状态栏 quickCapture 落库触发 reloadMonth→renderAll)同样不许吃草稿
+  await T10.addMemo('别处落的一条')
+  await sleep(40)
+  A.ok(edNow(), '并发落库后编辑框仍在')
+  A.equal(edNow().value, DRAFT, '并发落库触发的整树重画同样不吃编辑框草稿')
+  // 草稿真能存下去:此时界面是英文,按钮名 Save
+  btnIn(edRow(), 'Save').listeners.click[0]()
+  await sleep(40)
+  A.ok(V10.get('闪念盒/2026-08.md').includes(DRAFT), '保存落盘的是草稿全文,不是被重画回读的磁盘原文')
+  A.equal(edNow(), null, '保存后退出编辑态')
+
+  // 换一条编辑 → 上一条的草稿必须作废(否则第二条的编辑框会带出上一条的字)
+  fireLocale('zh')
+  await sleep(20)
+  btnIn(rowWith(DRAFT), '编辑').listeners.click[0]()
+  await sleep(20)
+  edNow().value = '这段不该跑到第二条里去'
+  edNow().listeners.input[0]()
+  btnIn(rowWith('第二条'), '编辑').listeners.click[0]()
+  await sleep(20)
+  A.equal(rowsOf().filter((r) => byTag(r, 'textarea').length > 0).length, 1, '同一时刻只有一条处于编辑态')
+  A.equal(edNow().value, '第二条', '换一条编辑:上一条的草稿作废,不串味')
+  btnIn(edRow(), '取消').listeners.click[0]()
+  await sleep(20)
+  A.equal(edNow(), null, '取消后退出编辑态')
+
+  // ③ 计数与列表分隔符按语言取
+  fireLocale('zh')
+  A.equal(T10.nMemos(1), '1 条', '中文无复数:1 条')
+  A.equal(T10.nMemos(2), '2 条', '中文无复数:2 条')
+  A.equal(T10.nMonthFiles(1), '1 个月文件', '中文量词:个月文件')
+  A.equal(T10.joinList(['2026-06', '2026-07']), '2026-06、2026-07', '中文列表用顿号')
+  A.equal(
+    T10.t('digestHead', { date: '2026-08-14', c: T10.nMemos(3) }),
+    '> 由「闪念盒」AI 周整理生成 · 2026-08-14 · 覆盖 3 条闪念',
+    '中文周整理抬头逐字未变(产物格式不因本地化重构漂移)',
+  )
+  fireLocale('en')
+  A.equal(T10.nMemos(1), '1 memo', '英文单数不带 s')
+  A.equal(T10.nMemos(2), '2 memos', '英文复数带 s')
+  A.equal(T10.nMonthFiles(1), '1 month file', '英文单数:month file')
+  A.equal(T10.nMonthFiles(2), '2 month files', '英文复数:month files')
+  A.equal(T10.joinList(['2026-06', '2026-07']), '2026-06, 2026-07', '英文列表用逗号')
+  // 中文标点用码点写死:直接把「,」打进字符类容易误敲成 ASCII 逗号,那条断言就恒真了
+  const CJK_PUNCT = /[\u3001\u3002\uFF0C\uFF0E\uFF1A\uFF1B\uFF08\uFF09\u300C\u300D]/
+  const warnEn = T10.t('monthsFailed', { c: T10.nMonthFiles(2), list: T10.joinList(['2026-06', '2026-07']) })
+  A.ok(!CJK_PUNCT.test(warnEn), `英文告警不含中文标点:${warnEn}`)
+  A.ok(warnEn.startsWith('2 month files could not be read (2026-06, 2026-07)'), `英文告警拼串正确:${warnEn}`)
+  const refuseEn = T10.t('rebuildRefused', { c: T10.nMonthFiles(1), list: T10.joinList(['2026-06']) })
+  A.ok(!CJK_PUNCT.test(refuseEn) && refuseEn.startsWith('1 month file could not be read'), `重建拒绝串英文单数正确:${refuseEn}`)
+  // 这行会跟着周整理产物落盘长期留着 —— 英文单复数错在这里代价最大
+  const headEn1 = T10.t('digestHead', { date: '2026-08-14', c: T10.nMemos(1) })
+  A.ok(headEn1.endsWith('covering 1 memo'), `落盘的周整理抬头英文单数正确:${headEn1}`)
+  A.ok(T10.t('digestHead', { date: '2026-08-14', c: T10.nMemos(9) }).endsWith('covering 9 memos'), '落盘的周整理抬头英文复数正确')
+  for (const k of ['stats', 'heatCell', 'rebuildOk', 'digestHead', 'writeCanceledKnown', 'rebuildRefused', 'monthsFailed']) {
+    A.ok(!/\{n\}/.test(String(T10.MSG.en[k])) && !/\{n\}/.test(String(T10.MSG.zh[k])),
+      `计数串 ${k} 走 {c} 整短语,不许再留裸数字 {n}(英文会拼出 1 memos)`)
+  }
+  // 占位符 × 调用点静态对账:上面的 leakScan 只盖到视图里渲染得出来的串,
+  // 告警/产物类(digestHead、writeCanceledKnown…)平时不上屏,漏改调用点要等用户踩
+  const holdersOf = (s) => [...new Set(String(s).match(/\{[a-zA-Z]+\}/g) || [])].map((x) => x.slice(1, -1))
+  const missing = []
+  for (const k of Object.keys(T10.MSG.zh)) {
+    const need = holdersOf(T10.MSG.zh[k])
+    if (!need.length) continue
+    const re = new RegExp(`t\\('${k}',\\s*\\{([^}]*)\\}`, 'g')
+    let m
+    while ((m = re.exec(src))) {
+      for (const nm of need) {
+        if (!new RegExp(`(^|[\\s,{])${nm}\\s*([:,]|$)`).test(m[1])) missing.push(`${k} 的调用点没给 {${nm}}`)
+      }
+    }
+  }
+  A.deepEqual(missing, [], 't() 字面调用点必须给齐词表里的占位符(缺一个就渲染出裸 {name},不抛错)')
+
+  cleanup10()
+  dispose10()
+  A.equal(subs10.size, 0, '双语(二):语言订阅退干净')
+}
+
+console.log('check ok — 视图/3 命令/1 设置/状态栏/成就 契约 + 月文件往返(含前言/Amadeus 块标记四形态) + 标签 + seed 回顾(同日冻结) + 缓存等式 + 跨年月序 + 删除保全 + XSS + P0 写前防线(ioFail 拒写/折叠宿主缓存证词/ensureCacheFile 不覆写/增量补丁不清证词/P0 链条闭环) + P1 变更读不到一律拒改 + 并发串行 + IME/双Enter 闸 + 语音双姿势 + MediaRecorder 抛出停流 + digest 嵌套围栏 + 转笔记不覆写 + 双旧宿主降级 + 双语(词表两侧键/占位符集合相等 · 切 en 后同一挂载视图就地变英文 · 语言订阅退干净 · zh→en→zh 逐字回归 · 切语言/并发落库不吃编辑框草稿 · 计数单复数与列表分隔符按语言 · 裸占位符扫描+调用点对账) 全部通过')
