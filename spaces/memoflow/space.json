@@ -2,6 +2,7 @@
   "id": "memoflow",
   "name": { "zh": "闪念盒", "en": "MemoFlow" },
   "icon": "zap",
+  "iconFile": "icon.png",
   "version": "1.0.0",
   "layout": {
     "main": [{ "type": "plugin:memoflow:memos" }]

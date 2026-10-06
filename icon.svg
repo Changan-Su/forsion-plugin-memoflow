@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">MemoFlow — Thought inbox</title>
+  <!-- Original Forsion plugin identity artwork, 2026-10-05. -->
+  <defs><linearGradient id="tile" x1="28" y1="12" x2="222" y2="252" gradientUnits="userSpaceOnUse"><stop stop-color="#57414b"/><stop offset="1" stop-color="#34272d"/></linearGradient></defs>
+  <rect x="4" y="4" width="248" height="248" rx="58" fill="url(#tile)"/>
+  <g style="--ink:#f7ecdf;--accent:#d1a2b2;--cut:#34272d" fill="none" stroke="var(--ink)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="89" y="47" width="84" height="100" rx="14" transform="rotate(-10 131 97)" fill="var(--ink)" stroke="none"/>
+    <path d="M111 79l38-7m-34 28 29-5" stroke="var(--cut)" stroke-width="8"/>
+    <path d="M61 141L49 172V190Q49 207 66 207H190Q207 207 207 190V172L196 141H164L153 164H103L92 141Z" fill="var(--accent)" stroke="none"/>
+    <path d="M62 180h132" stroke="var(--cut)" stroke-width="8"/>
+  </g>
+</svg>
