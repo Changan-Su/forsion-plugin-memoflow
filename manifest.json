@@ -2,37 +2,41 @@
   "id": "memoflow",
   "name": "闪念盒",
   "nameEn": "MemoFlow",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "apiVersion": 1,
-  "description": "flomo 式低摩擦速记:文字或语音随手记一条,自动按月落成你笔记库里的纯 Markdown 文件(<工作文件夹>/YYYY-MM.md,# 标签行内直打),时间线 / 标签过滤 / 12 周热力图一目了然;每天从 7 天前更早的旧闪念里抽几条「每日回顾」再浮现,单条可一键转正式笔记;「AI 周整理」把近期闪念文本交给你自己的 Tangu 引擎按主题聚类成周报,产物写回 整理/ 文件夹。数据流向:闪念全部存在本地笔记库,语音走 Forsion 桌面自带的语音识别链路(不保存音频原文件),AI 周整理只把闪念文本发给你登录的 Forsion 后端,不经任何第三方服务。",
-  "descriptionEn": "Low-friction capture, flomo style: jot a thought by typing or by voice and it lands as plain Markdown in your own vault, one file per month (<work folder>/YYYY-MM.md, with # tags written inline). A timeline, tag filters and a 12-week heatmap keep it all in view. Every day a few older memos (7+ days back) resurface as Daily Review cards, and any single memo can be turned into a real note in one click. AI Weekly Digest hands your recent memos to your own Tangu engine, which clusters them by theme into a weekly write-up saved back into the 整理/ folder. Where the data goes: memos never leave your local vault; voice goes through Forsion Desktop's own speech pipeline (no audio file is kept); AI Weekly Digest sends memo text only to the Forsion backend you are signed in to, never to a third party.",
+  "description": "flomo 式低摩擦速记:文字或语音随手记一条,自动按月落成你笔记库里的纯 Markdown 文件(<工作文件夹>/YYYY-MM.md,# 标签行内直打),左栏标签树、时间线、右栏 12 周热力图一目了然,在 Mini 窗口里也能随手记;每天从 7 天前更早的旧闪念里抽几条「每日回顾」再浮现,单条可一键转正式笔记;「AI 周整理」把近期闪念文本交给你自己的 Tangu 引擎按主题聚类成周报,产物写回 整理/ 文件夹。数据流向:闪念全部存在本地笔记库,语音走 Forsion 桌面自带的语音识别链路(不保存音频原文件),AI 周整理只把闪念文本发给你登录的 Forsion 后端,不经任何第三方服务。",
+  "descriptionEn": "Low-friction capture, flomo style: jot a thought by typing or by voice and it lands as plain Markdown in your own vault, one file per month (<work folder>/YYYY-MM.md, with # tags written inline). A tag tree in the sidebar, a timeline and a 12-week heatmap keep it all in view, and the Mini window lets you capture without leaving what you are doing. Every day a few older memos (7+ days back) resurface as Daily Review cards, and any single memo can be turned into a real note in one click. AI Weekly Digest hands your recent memos to your own Tangu engine, which clusters them by theme into a weekly write-up saved back into the 整理/ folder. Where the data goes: memos never leave your local vault; voice goes through Forsion Desktop's own speech pipeline (no audio file is kept); AI Weekly Digest sends memo text only to the Forsion backend you are signed in to, never to a third party.",
   "main": "main.js",
   "onboarding": {
     "intro": "闪念盒 = 想到就记、记了会再见到:速记进月文件,每天回顾几条旧想法,攒够一周让 Tangu 帮你按主题整理。",
     "steps": [
       {
         "title": "随手记",
-        "description": "命令面板「闪念盒:打开」进视图,输入框 Enter 发送、Shift+Enter 换行,# 打标签(如 #产品)。不想开视图就点状态栏「✎ 闪念」或命令「闪念盒:快速记一条」,一行输入直接落库。"
+        "description": "进闪念盒 Space,在输入框里写,Enter 发送,Shift+Enter 换行。打 # 会出现标签补全(如 #产品/路线图)。不想开视图就点状态栏「✎ 闪念」,或命令「闪念盒:快速记一条」。"
+      },
+      {
+        "title": "Mini 窗口",
+        "description": "按 ⇧⌘M 打开 Mini,切到闪念盒:上面记,下面看今天记过的。记完留在原地,焦点还在输入框,可以连着记。窗口拖矮只剩输入框,拖宽显示全部标签和日期分组。"
       },
       {
         "title": "语音速记",
-        "description": "输入区的 🎙 按钮:按住说话松开结束,或点一下开始、再点一下结束。转写走 Forsion 桌面自己的语音链路(设置 → 语音),文字先进输入框给你改,不会直接发出;插件不保存音频原文件。"
+        "description": "输入框左下的语音按钮:按住说话松开结束,或点一下开始、再点一下结束。转写走 Forsion 桌面自己的语音链路(设置 → 语音),文字先进输入框给你改,不会直接发出;插件不保存音频原文件。"
+      },
+      {
+        "title": "标签",
+        "description": "标签树在左栏,嵌套标签用 / 分隔,父标签的数字包含子标签。点左栏换一个标签,点正文里的标签再加一个条件(同时满足)。右键标签可以改名、合并,确认框会写明要改多少条闪念。"
       },
       {
         "title": "每日回顾",
-        "description": "当天存在 7 天前更早的未归档闪念时,输入区下方会浮出几张回顾卡(条数在插件设置里改),逐张选「跳过 / 转笔记 / 归档」,全部处理完自动收起。同一天里抽到的卡固定,第二天换一批。"
-      },
-      {
-        "title": "找回来",
-        "description": "时间线倒序按日分组;点正文里的 #标签 过滤,搜索框全文过滤,热力图(近 12 周)点格子看那天记了什么。单条可就地编辑、置顶、归档、删除。"
+        "description": "当天存在 7 天前更早的未归档闪念时,输入框下方会出现一叠回顾卡(条数在插件设置里改),一次一张,选「跳过 / 转笔记 / 归档」,看完自动收起。同一天里抽到的卡固定,第二天换一批。"
       },
       {
         "title": "AI 周整理",
-        "description": "命令「闪念盒:AI 周整理」:把近 7 天(不足 50 条则取最近 50 条)的闪念交给 Tangu 按主题聚类,产出存到 整理/YYYY-Www-周整理.md 并自动打开。需要已登录 Forsion。"
+        "description": "右栏或标题行的「AI 周整理」:把近 7 天(不足 50 条则取最近 50 条)的闪念交给 Tangu 按主题聚类,产出存到 整理/YYYY-Www-周整理.md 并自动打开。需要已登录 Forsion。"
       },
       {
         "title": "数据在哪",
-        "description": "全部在你的笔记库:月文件 <工作文件夹>/YYYY-MM.md(纯 Markdown,可直接当笔记打开),派生统计 .memoflow-cache.json(可随时点「重建缓存」按钮从月文件重算),转笔记与周整理产物在 整理/ 子文件夹。产物路径固定,不随界面语言变。"
+        "description": "全部在你的笔记库:月文件 <工作文件夹>/YYYY-MM.md(纯 Markdown,可直接当笔记打开),派生统计 .memoflow-cache.json(⋯ 菜单里的「重建缓存」可随时从月文件重算),转笔记与周整理产物在 整理/ 子文件夹。产物路径固定,不随界面语言变。"
       }
     ],
     "en": {
@@ -40,27 +44,31 @@
       "steps": [
         {
           "title": "Capture",
-          "description": "Open the view with the \"MemoFlow: Open\" command. Enter sends, Shift+Enter adds a line, # writes a tag inline (e.g. #product). Don't want the view? Click \"✎ Memo\" in the status bar or run \"MemoFlow: Quick Capture\" — one line of input goes straight into the vault."
+          "description": "Open the MemoFlow Space and type in the input box. Enter sends, Shift+Enter adds a line, and typing # brings up tag suggestions (e.g. #product/roadmap). Don't want the view? Click \"✎ Memo\" in the status bar or run \"MemoFlow: Quick Capture\"."
+        },
+        {
+          "title": "Mini window",
+          "description": "Press ⇧⌘M and switch to MemoFlow: write at the top, see today's memos below. You stay in place after capturing, with focus still in the input box, so you can keep going. Drag the window short and only the input box remains; drag it wide for all tags and day groups."
         },
         {
           "title": "Voice capture",
-          "description": "The 🎙 button in the composer: hold to talk and release to finish, or click once to start and again to stop. Transcription runs through Forsion Desktop's own speech pipeline (Settings → Voice). The text lands in the composer first so you can fix it — nothing is sent automatically, and no audio file is kept."
+          "description": "The voice button at the bottom left of the input box: hold to talk and release to finish, or click once to start and again to stop. Transcription runs through Forsion Desktop's own speech pipeline (Settings → Voice). The text lands in the input box first so you can fix it. Nothing is sent automatically, and no audio file is kept."
+        },
+        {
+          "title": "Tags",
+          "description": "The tag tree lives in the sidebar. Nested tags use /, and a parent's count includes its sub-tags. Click the sidebar to switch to a tag, click a tag in a memo to add a condition (both must match). Right-click a tag to rename or merge it; the confirmation says how many memos will change."
         },
         {
           "title": "Daily Review",
-          "description": "On days when you have unarchived memos from 7+ days ago, a few review cards appear under the composer (count is a plugin setting). Handle each one with Skip / To Note / Archive; the strip folds away once they are all done. The picks stay fixed for the day and change tomorrow."
-        },
-        {
-          "title": "Find it again",
-          "description": "The timeline runs newest-first, grouped by day. Click a #tag in a memo to filter, use the search box for full-text filtering, and click a heatmap cell (last 12 weeks) to see what you wrote that day. Each memo can be edited in place, pinned, archived or deleted."
+          "description": "On days when you have unarchived memos from 7+ days ago, a small stack of review cards appears under the input box (the count is a plugin setting). Handle one at a time with Skip / To Note / Archive; the stack folds away when you finish. The picks stay fixed for the day and change tomorrow."
         },
         {
           "title": "AI Weekly Digest",
-          "description": "Run \"MemoFlow: AI Weekly Digest\": the last 7 days of memos (or the most recent 50 if that is fewer) go to Tangu, which clusters them by theme. The result is saved to 整理/YYYY-Www-周整理.md and opened for you. Requires being signed in to Forsion."
+          "description": "Use \"AI Weekly Digest\" in the sidebar panel or the title row: the last 7 days of memos (or the most recent 50 if that is fewer) go to Tangu, which clusters them by theme. The result is saved to 整理/YYYY-Www-周整理.md and opened for you. Requires being signed in to Forsion."
         },
         {
           "title": "Where the data lives",
-          "description": "All of it is in your vault: monthly files at <work folder>/YYYY-MM.md (plain Markdown, openable as ordinary notes), derived stats in .memoflow-cache.json (the \"Rebuild Cache\" button recomputes them from the monthly files at any time), and notes plus digests in the 整理/ subfolder. Those paths are fixed — they do not change with the interface language."
+          "description": "All of it is in your vault: monthly files at <work folder>/YYYY-MM.md (plain Markdown, openable as ordinary notes), derived stats in .memoflow-cache.json (\"Rebuild Cache\" in the ⋯ menu recomputes them from the monthly files at any time), and notes plus digests in the 整理/ subfolder. Those paths are fixed and do not change with the interface language."
         }
       ]
     },

@@ -13,6 +13,10 @@
  *   折叠宿主仅凭缓存证词仍拒写)/ P1 persistMonthOp 读不到一律拒改(绝不用陈旧 store 整月重写覆没外部新条)/
  *   Amadeus 块标记 <!-- a N -->(尾随标记不吃哨兵 · 各形态往返逐字节 · 写回不破坏宿主 BLOCK_MARKER_RE · 旧坏形态自愈 ·
  *   时间线不当正文展示)/ MediaRecorder 构造抛出必停麦克风流 / parseDigest 嵌套围栏不截断。
+ * 2.0(2026-10-31):解析对账(Genesis TAG_RE 对照样例)/ 前缀匹配 / 旧缓存只换 tags / 左栏树(parent + folder + 按条去重计数)/
+ *   筛选替换与追加 + 留下的行不重建 / 改名合并写盘(其余字节不变、块标记与哨兵、子标签、去重、读失败零写入、折叠宿主证词、
+ *   确认期间外部写入、部分失败)/ ChatBox 新字段与句柄探测回退 / Mini 断点与参数带到主面板 / 跨窗口刷新 / 手机摊平 /
+ *   六条动效的时长曲线与减少动态效果。
  * 跑法:node check.mjs
  */
 process.env.TZ = 'Asia/Shanghai'
@@ -53,6 +57,7 @@ function mkText(t) {
   Object.defineProperty(n, 'textContent', { get: () => v, set: (x) => { v = String(x) } })
   return n
 }
+const ANIM = { on: false, log: [] }
 function mkEl(tag) {
   const el = {
     tag, children: [], attrs: {}, listeners: {}, parentElement: null, isConnected: true,
@@ -74,9 +79,25 @@ function mkEl(tag) {
   let own = ''
   el.appendChild = (c) => {
     if (c && c.tag === '#frag') { for (const k of c.children.slice()) el.appendChild(k); return c }
+    if (c && c.parentElement && c.parentElement !== el) c.remove?.()
+    if (c && c.parentElement === el) el.children = el.children.filter((x) => x !== c)
     el.children.push(c); if (c && typeof c === 'object') c.parentElement = el
     return c
   }
+  el.insertBefore = (c, ref) => {
+    if (c.parentElement === el) el.children = el.children.filter((x) => x !== c)
+    const i = ref ? el.children.indexOf(ref) : -1
+    if (i < 0) el.children.push(c); else el.children.splice(i, 0, c)
+    c.parentElement = el
+    return c
+  }
+  const animate = (kf, o) => { ANIM.log.push({ el, kf, ms: o.duration, easing: o.easing }); return { finished: Promise.resolve() } }
+  Object.defineProperty(el, 'animate', { get: () => (ANIM.on ? animate : undefined) })
+  el.offsetHeight = 20
+  el.getBoundingClientRect = () => ({ left: 10, top: 10, width: 300, height: 20 })
+  el.children = el.children
+  Object.defineProperty(el, 'firstChild', { get: () => el.children[0] || null })
+  Object.defineProperty(el, 'nextSibling', { get: () => { const s = el.parentElement ? el.parentElement.children : []; return s[s.indexOf(el) + 1] || null } })
   Object.defineProperty(el, 'textContent', {
     get: () => own + el.children.map((c) => (c && c.textContent) || '').join(''),
     set: (v) => { el.children.length = 0; own = String(v) },
@@ -444,7 +465,6 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
   A.equal(cache.total, 1)
   A.ok(reg.tracks.includes('capture'), '成就 capture 埋点')
   A.ok(reg.activity.find(([e]) => e === 'capture'), '活动日志 capture')
-  A.deepEqual(JSON.parse(_ls.get('plugin.memoflow.recentTags')), ['tag1'], '近用标签记录')
 }
 // 快速命令(状态栏同源):prompt → 落库
 {
@@ -529,23 +549,34 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
   const reviewCards = byAttr(mountEl, 'data-review')
   A.ok(reviewCards.length >= 1 && reviewCards.length <= 4, `每日回顾条出现(${reviewCards.length} 卡)`)
   A.ok(byAttr(mountEl, 'data-voice').length === 1, '语音桥在场 → 语音按钮渲染')
-  const cells = findAll(mountEl, (c) => c.attrs && /^\d{4}-\d{2}-\d{2} · \d+ 条$/.test(c.attrs.title || ''))
-  A.equal(cells.length, 84, '热力图 12 周 × 7 天,格子 title=日期+条数')
+  const sideEl = mkEl('div')
+  const sideOff = reg.views.find((v) => v.id === 'activity').mount(sideEl)
+  await sleep(10)
+  const cells = findAll(sideEl, (c) => c.attrs && /^\d{4}-\d{2}-\d{2} · \d+ 条$/.test(c.attrs.title || ''))
+  A.equal(cells.length, 84, '热力图进右栏:12 周 × 7 天,格子 title=日期+条数')
   A.ok(cells.some((c) => c.attrs.title === '2026-08-06 · 6 条'), '今天格子计数正确')
+  A.ok(!findAll(mountEl, (c) => /mf-cell/.test(c.className || '')).length, '主区不再放热力图')
+  sideOff()
 
   // ── 每日回顾同日冻结:处理动作缩小池子也不重抽,绝不引入没见过的新卡 ──
   {
     const cardsOf = () => byAttr(mountEl, 'data-review')
     const textOf = (c) => findAll(c, (x) => x.className === 'mf-rtext')[0].textContent
-    const texts0 = cardsOf().map(textOf)
-    A.ok(texts0.length >= 2, `冻结测试需要 ≥2 张卡(见 ${texts0.length})`)
-    const arcBtn = findAll(cardsOf()[0], (c) => c.tag === 'button' && c.textContent === '归档')[0]
+    const topCard = () => cardsOf().find((c) => !c.attrs['aria-hidden'])
+    const leftOf = () => Number(/还剩 (\d+) 张/.exec(findAll(topCard(), (x) => x.className === 'mf-rdate')[0].textContent)[1])
+    A.equal(cardsOf().filter((c) => !c.attrs['aria-hidden']).length, 1, '牌堆一次只露一张')
+    A.equal(findAll(cardsOf().find((c) => c.attrs['aria-hidden']), (c) => c.tag === 'button').length, 0, '垫在后面的牌没有按钮')
+    // 冻结判据:今天的卡固定是 pickReview 这 4 条,处理动作绝不重抽
+    const pool = T.reviewEligible([...T.parseMonth(V.get('闪念盒/2026-07.md')).memos, ...T.parseMonth(V.get('闪念盒/2026-08.md')).memos], '2026-08-06')
+    const frozen = T.pickReview(pool, T.seedOfDay('2026-08-06'), 4).map((m) => m.text)
+    const left0 = leftOf(), first = textOf(topCard())
+    A.ok(left0 >= 2, `冻结测试需要 ≥2 张卡(见 ${left0})`)
+    const arcBtn = findAll(topCard(), (c) => c.tag === 'button' && c.textContent === '归档')[0]
     arcBtn.listeners.click[0]()
     await sleep(40)
-    const texts1 = cardsOf().map(textOf)
-    A.equal(texts1.length, texts0.length - 1, '处理一张后只少这一张(不重抽补位)')
-    A.ok(texts1.every((t2) => texts0.includes(t2)), '同日回顾卡冻结:绝不引入没见过的新卡')
-    A.ok(!texts1.includes(texts0[0]), '被归档的卡不再显示')
+    A.equal(leftOf(), left0 - 1, '处理一张后只少这一张(不重抽补位)')
+    A.ok(cardsOf().map(textOf).every((t2) => frozen.includes(t2)), '同日回顾卡冻结:绝不引入没见过的新卡')
+    A.ok(!cardsOf().map(textOf).includes(first), '被归档的卡不再显示')
   }
 
   // ── Enter 通道:IME 合成态不发送;双 Enter 重入闸只落一条 ──
@@ -1157,4 +1188,642 @@ dispose()
   A.equal(subs10.size, 0, '双语(二):语言订阅退干净')
 }
 
-console.log('check ok — 视图/3 命令/1 设置/状态栏/成就 契约 + 月文件往返(含前言/Amadeus 块标记四形态) + 标签 + seed 回顾(同日冻结) + 缓存等式 + 跨年月序 + 删除保全 + XSS + P0 写前防线(ioFail 拒写/折叠宿主缓存证词/ensureCacheFile 不覆写/增量补丁不清证词/P0 链条闭环) + P1 变更读不到一律拒改 + 并发串行 + IME/双Enter 闸 + 语音双姿势 + MediaRecorder 抛出停流 + digest 嵌套围栏 + 转笔记不覆写 + 双旧宿主降级 + 双语(词表两侧键/占位符集合相等 · 切 en 后同一挂载视图就地变英文 · 语言订阅退干净 · zh→en→zh 逐字回归 · 切语言/并发落库不吃编辑框草稿 · 计数单复数与列表分隔符按语言 · 裸占位符扫描+调用点对账) 全部通过')
+// ══ 2.0 新宿主:左栏列表源 · 筛选 · 改名合并 · ChatBox · Mini · 手机 · 动效 ══════════════
+function mkHost(o = {}) {
+  const V = new Map(o.files || [])
+  const reg = { views: [], lists: [], commands: [], notes: [], confirms: [], menus: [], writes: [], boxes: [], controls: [], heads: [], watch: new Map(), empty: [] }
+  const fail = { read: o.failRead || null, write: null }
+  const ui = o.ui === false ? undefined : {
+    icon: (name) => { const s = mkEl('svg'); s.attrs['data-icon'] = name; return s },
+    confirm: async (x) => { reg.confirms.push(x); return o.confirm !== false },
+    contextMenu: (at, items) => { reg.menus.push({ at, items }); return { close() {} } },
+    setViewHead: (el, opts) => { const h2 = { opts, actions: mkEl('div'), update() {}, dispose() { h2.gone = true } }; for (const a of opts.actions || []) h2.actions.appendChild(a); reg.heads.push(h2); return h2 },
+    mountEmptyState: (el, opts) => { reg.empty.push(opts); const d = mkEl('div'); d.textContent = opts.title; el.appendChild(d); return { update() {}, dispose() { d.remove() } } },
+    ...(o.control === false ? {} : { mountControl: (el, c) => { const h2 = { c, update(p) { Object.assign(c, p) }, dispose() {} }; reg.controls.push(h2); return h2 } }),
+    ...(o.chatBox === 'new' ? { mountChatBox: (el, opts) => {
+      const toolbar = mkEl('div'); el.appendChild(toolbar)
+      if (opts.toolbar) opts.toolbar(toolbar)
+      const b = { opts, toolbar, inserted: [], focused: 0, disposed: 0, update(p) { Object.assign(opts, p) }, focus() { b.focused += 1 }, dispose() { b.disposed += 1 }, insertText(s) { b.inserted.push(s) } }
+      reg.boxes.push(b)
+      return b
+    } } : {}),
+    ...(o.chatBox === 'old' ? { mountChatBox: (el, opts) => { const b = { opts, disposed: 0, update() {}, focus() {}, dispose() { b.disposed += 1 } }; reg.boxes.push(b); return b } } : {}),
+  }
+  const ctx = {
+    registerView: (v) => reg.views.push(v), registerCommand: (c) => reg.commands.push(c), registerSetting() {},
+    ...(o.list === false ? {} : { registerListSource: (s) => reg.lists.push(s) }),
+    listCapabilities: o.caps === undefined ? ['tree', 'items', 'rename'] : o.caps,
+    openView() {}, notify: (m, l) => reg.notes.push([m, l]), getLocale: () => o.locale || 'zh',
+    ...(ui ? { ui } : {}),
+    app: {
+      notify() {}, openFile() {}, workFolder: () => '闪念盒',
+      prompt: async () => o.prompt?.shift?.() ?? null,
+      readFile: async (p) => { if (fail.read && fail.read(p)) throw new Error('EBUSY (mock)'); return V.has(p) ? V.get(p) : null },
+      writeFile: async (p, t2) => { if (fail.write && fail.write(p)) throw new Error('ENOSPC (mock)'); V.set(p, String(t2)); reg.writes.push(p) },
+      ...(o.watch ? { watchFile: (p, cb) => { reg.watch.set(p, cb); return () => reg.watch.delete(p) } } : {}),
+    },
+  }
+  globalThis.__MEMOFLOW_TEST__ = {}
+  const dispose = new Function('ctx', src)(ctx)
+  return { V, reg, ctx, fail, T: globalThis.__MEMOFLOW_TEST__, dispose, view: (id) => reg.views.find((v) => v.id === id), list: () => reg.lists[0] }
+}
+const AUGP = '闪念盒/2026-08.md', CACHEP = '闪念盒/.memoflow-cache.json'
+const mdOf = (...rows) => ['# 2026-08', '', ...rows.flatMap(([ts, x]) => [`### 2026-08-${ts}:00:00.000Z`, x, ''])].join('\n')
+const TAGGED = mdOf(
+  ['01T02', 'a 路线 #产品/路线图 #产品/用户'], ['02T02', 'b #产品'], ['03T02', 'c #设计 #产品'], ['04T02', 'd #Design/颜色'],
+  ['05T02', 'e #workshop'], ['05T03', 'f 没标签'], ['05T04', '归档的 #产品/路线图 ⌫arch'],
+)
+_ls.set('plugin.memoflow.firstMonth', '2026-08')
+_ls.delete('plugin.memoflow.reviewDone')
+
+// ── 标签索引:按条去重、大小写折叠、显示最先出现的写法、归档不计 ──
+{
+  const H = mkHost()
+  const idx = H.T.buildTagIndex(T.parseMonth(TAGGED).memos.filter((m) => !m.archived))
+  A.equal(idx.nodes.get('产品').count, 3, '父标签 = 自身 + 子标签按条去重(同一条带两个子标签只算一次)')
+  A.equal(idx.nodes.get('产品/路线图').count, 1)
+  A.deepEqual(idx.roots[0].children.map((n) => n.name).sort(), ['用户', '路线图'].sort(), '子标签挂在父标签下')
+  const ci = H.T.buildTagIndex([
+    { ts: '2026-08-02T00:00:00.000Z', text: '#foo/Bar', archived: false }, { ts: '2026-08-01T00:00:00.000Z', text: '#Foo', archived: false },
+  ])
+  A.equal(ci.nodes.size, 2, '大小写折叠成一个节点')
+  A.equal(ci.nodes.get('foo').path, 'Foo', '显示最先出现的写法(按时间)')
+  A.equal(ci.nodes.get('foo').count, 2)
+  H.dispose()
+}
+
+// ── 左栏列表源:树(parent + folder)/ 平铺回退 / 空库 / 搜索 ──
+{
+  const H = mkHost({ files: [[AUGP, TAGGED]] })
+  const src = H.list()
+  A.ok(src, '注册了左栏列表源')
+  A.equal(src.items().length, 0, '没加载时给空:不写假数据')
+  let pings = 0
+  const off = src.subscribe(() => { pings += 1 })
+  await sleep(30)
+  A.ok(pings > 0, '加载完通知左栏')
+  const rows = src.items()
+  const by = (k) => rows.find((r) => r.key === k)
+  A.deepEqual(rows.slice(0, 1).map((r) => r.key), ['nav:all'])
+  A.ok(by('nav:archived'), '已归档进左栏')
+  A.equal(by('folder:产品').kind, 'folder', '有子标签的是 folder')
+  A.equal(by('folder:产品').hint, '3', 'hint 放计数')
+  A.equal(by('tag:产品').parent, 'folder:产品', '父标签本身要有一行能点(folder 点了只开合)')
+  A.equal(by('tag:产品/路线图').parent, 'folder:产品', '子标签 parent 指向父 folder')
+  A.equal(by('tag:产品/路线图').title, '路线图', '树里只写最后一段')
+  A.equal(by('folder:产品').group, H.T.t('navTags'), '顶层归到「标签」分区')
+  A.equal(by('tag:产品/路线图').group, undefined, '子行不写 group')
+  A.equal(by('tag:设计').kind, undefined, '没子标签的是普通行')
+  A.equal(src.activeKey(), 'nav:all', '缺省高亮全部闪念')
+  src.open(by('tag:产品'))
+  A.equal(src.activeKey(), 'tag:产品', '点标签后高亮这一行')
+  A.deepEqual(H.T.nav.tags, ['产品'], '左栏点 = 替换')
+  src.open(by('nav:all'))
+  const q = src.items({ query: '路线' })
+  A.ok(q.every((r) => !r.parent && !r.kind), '搜索结果是平铺的')
+  A.ok(q.some((r) => r.key === 'tag:产品/路线图' && r.title === '产品 / 路线图'), '搜索能搜到标签')
+  A.ok(q.some((r) => r.key.startsWith('memo:')), '搜索能搜到闪念')
+  A.ok(!q.some((r) => r.title.includes('归档的')), '搜索不含已归档')
+  A.deepEqual(src.itemMenu({ key: 'nav:all' }), [], '导航行没有标签菜单')
+  A.deepEqual(src.itemMenu(by('tag:设计')).map((a) => a.id), ['rename', 'merge'], '标签右键:改名、合并')
+  A.deepEqual(src.itemMenu(by('folder:产品')).map((a) => a.id), ['filter', 'rename', 'merge'], 'folder 行另有筛选')
+  off(); H.dispose()
+
+  const old = mkHost({ files: [[AUGP, TAGGED]], caps: undefined === 0 ? [] : [], ui: false })
+  const offOld = old.list().subscribe(() => {})
+  await sleep(30)
+  const flat = old.list().items()
+  A.ok(flat.every((r) => !r.parent && !r.kind), '没有 tree 能力:不发 parent / folder')
+  A.ok(flat.some((r) => r.title === '产品 / 路线图'), '平铺时写全路径')
+  offOld(); old.dispose()
+
+  const none = mkHost()
+  const offNone = none.list().subscribe(() => {})
+  await sleep(30)
+  A.deepEqual(none.list().items(), [], '空库:左栏不写字,不带示例')
+  A.ok(none.list().empty && typeof none.list().empty.title === 'function', '列表源给了 empty,文案跟语言走')
+  A.equal(none.V.get(AUGP), undefined, '装好是空的:不写示例闪念')
+  offNone(); none.dispose()
+}
+
+// ── 筛选:左栏替换 / 正文追加 / 清除;前缀匹配;动效 2 不重建留下的行 ──
+{
+  const H = mkHost({ files: [[AUGP, TAGGED]] })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const rowsNow = () => byAttr(el, 'data-memo').map((r) => r.textContent)
+  A.equal(rowsNow().length, 6, '时间线默认不含已归档')
+  A.ok(H.reg.heads.length === 1, '标题行用 ctx.ui.setViewHead')
+  const keptEl = byAttr(el, 'data-memo').find((r) => r.textContent.includes('b #产品'))
+  H.list().open({ key: 'tag:产品' })
+  await sleep(10)
+  A.deepEqual(rowsNow().map((s) => s.split(' ')[0].slice(-1)).sort(), ['a', 'b', 'c'], '查 产品 命中自身与子标签')
+  A.equal(byAttr(el, 'data-memo').find((r) => r.textContent.includes('b #产品')), keptEl, '留下的行不重建(动效的前提,整树重画做不到)')
+  const barText = () => findAll(el, (c) => /mf-flt/.test(c.className || ''))[0].textContent
+  A.ok(barText().includes('#产品') && barText().includes('3 条') && barText().includes('2 个子标签'), `筛选条写清数量:${barText()}`)
+  const tagBtn = findAll(el, (c) => c.className === 'mf-tag' && c.textContent === '#设计')[0]
+  tagBtn.listeners.click[0]()
+  await sleep(10)
+  A.deepEqual(H.T.nav.tags, ['产品', '设计'], '正文点标签 = 追加')
+  A.equal(rowsNow().length, 1, '追加后同时满足')
+  H.list().open({ key: 'tag:设计' })
+  await sleep(10)
+  A.deepEqual(H.T.nav.tags, ['设计'], '左栏点 = 替换,不累加')
+  H.T.setNav({ tags: ['work'] })
+  await sleep(10)
+  A.equal(rowsNow().length, 0, '查 work 不命中 workshop')
+  A.ok(el.textContent.includes('没有匹配的闪念'))
+  const clear = findAll(el, (c) => c.tag === 'button' && c.textContent === '清除')[0]
+  clear.listeners.click[0]()
+  await sleep(10)
+  A.deepEqual(H.T.nav.tags, [], '筛选条上清除')
+  A.equal(rowsNow().length, 6)
+  H.list().open({ key: 'nav:archived' })
+  await sleep(10)
+  A.equal(rowsNow().length, 1, '已归档视图只列归档')
+  A.ok(rowsNow()[0].includes('归档的'))
+  H.list().open({ key: 'nav:all' })
+  off(); H.dispose()
+}
+
+// ── 标签改名 / 合并:写盘断言 ──
+const RAW = [
+  '---', 'amadeus_page: pg1', '---', '手写导语 #产品 不在任何一节里', '', '<!-- a 1 -->', '', '# 2026-08', '',
+  '### 2026-08-01T02:00:00.000Z', '置顶 #产品 中间,#产品/路线图 ⚑pin', '',
+  '', // 非规范的多余空行
+  '### 2026-08-02T02:00:00.000Z', '归档 #Product/x 尾 #产品/路线图/深 ⌫arch', '', '<!-- a 2 -->', '',
+  '### 2026-08-03T02:00:00.000Z', '无关 #产品线 #设计', '',
+  '### 2026-08-04T02:00:00.000Z', '行尾空格 #产品  ', 'a.com/#产品',
+].join('\n')
+{
+  const r = T.renameTagInText('x #产品 y #产品/路线图 z #产品线 a.com/#产品', '产品', '项目')
+  A.equal(r.text, 'x #项目 y #项目/路线图 z #产品线 a.com/#产品', '只改标签 token:前缀外的、URL 片段不动')
+  A.equal(r.n, 2)
+  A.equal(T.renameTagInText('#Foo/Bar', 'foo', 'baz').text, '#baz/Bar', '大小写不敏感,子段写法保留')
+  A.equal(T.renameTagInText('a #旧 b #新 c', '旧', '新').text, 'a b #新 c', '合并去重:删这一处和它前面的空白')
+  A.equal(T.renameTagInText('#旧 #新 c', '旧', '新').text, '#新 c', '行首的重复:删它后面的空白')
+  A.equal(T.renameTagInText('#旧 x #旧/y #旧', '旧', '新').text, '#新 x #新/y', '改完互相重复的只留第一个')
+  A.equal(T.renameTagInText('x #新 #新', '旧', '新').text, 'x #新 #新', '和这次改名无关的重复不碰')
+
+  const out = T.renameTagInMonth(RAW, '产品', '项目')
+  const expected = RAW
+    .replace('置顶 #产品 中间,#产品/路线图 ⚑pin', '置顶 #项目 中间,#产品/路线图 ⚑pin')
+    .replace('尾 #产品/路线图/深 ⌫arch', '尾 #项目/路线图/深 ⌫arch')
+    .replace('行尾空格 #产品  ', '行尾空格 #项目  ')
+  A.equal(out.text, expected, '改名后其余字节不变(前言、块标记、哨兵、多余空行、行尾空格)')
+  A.equal(out.memos, 3, '按条计数')
+  A.ok(out.text.includes('手写导语 #产品'), '首节前的前言不算闪念,不动')
+  A.ok(out.text.includes('<!-- a 1 -->') && out.text.includes('<!-- a 2 -->'), '块标记行原样')
+  A.deepEqual(T.parseMonth(out.text).memos.map((m) => [m.pinned, m.archived]), T.parseMonth(RAW).memos.map((m) => [m.pinned, m.archived]), '哨兵语义不变')
+  const crlf = '# 2026-08\r\n\r\n### 2026-08-01T02:00:00.000Z\r\n#产品 一行\r\n'
+  A.equal(T.renameTagInMonth(crlf, '产品', '项目').text, crlf.replace('#产品', '#项目'), 'CRLF 文件不被改换行')
+}
+{
+  const cache = { v: 2, days: { '2026-08-01': 1, '2026-08-02': 1, '2026-08-03': 1, '2026-08-04': 1 }, tags: { 产品: 2, '产品/路线图': 2, 'Product/x': 1, 产品线: 1, 设计: 1 }, total: 4, builtAt: 1 }
+  const H = mkHost({ files: [[AUGP, RAW], [CACHEP, JSON.stringify(cache)]], prompt: ['项目'] })
+  const offL = H.list().subscribe(() => {})
+  await sleep(30)
+  H.T.setNav({ tags: ['产品/路线图'] }, 'none')
+  await H.T.renameTagFlow('产品', 'rename')
+  await sleep(10)
+  A.equal(H.reg.confirms.length, 1, '改之前先确认')
+  A.ok(H.reg.confirms[0].body.includes('3 条') && H.reg.confirms[0].body.includes('#产品') && H.reg.confirms[0].body.includes('#项目'), `确认框写明改多少条:${H.reg.confirms[0].body}`)
+  const after = H.V.get(AUGP)
+  A.equal(after, T.renameTagInMonth(RAW, '产品', '项目').text, '落盘内容 = 逐字替换')
+  A.ok(after.includes('#项目/路线图 ⚑pin') || after.includes('#项目/路线图/深 ⌫arch'), '子标签跟着改(产品/路线图 → 项目/路线图)')
+  const c2 = JSON.parse(H.V.get(CACHEP))
+  A.equal(c2.tags['产品'], undefined, '缓存减掉旧标签')
+  A.equal(c2.tags['项目'], 2, '缓存加上新标签')
+  A.deepEqual(c2.days, cache.days, '改名不动 days 证词')
+  A.deepEqual(H.T.nav.tags, ['项目/路线图'], '正在筛的标签跟着改名')
+  A.ok(H.T.listRows().some((r) => r.key === 'tag:项目'), '左栏跟着更新')
+  offL(); H.dispose()
+}
+{
+  // 确认框点取消:一字不写
+  const H = mkHost({ files: [[AUGP, RAW]], prompt: ['项目'], confirm: false })
+  const offL = H.list().subscribe(() => {})
+  await sleep(30)
+  const n0 = H.reg.writes.length
+  await H.T.renameTagFlow('产品', 'rename')
+  A.equal(H.reg.writes.length, n0, '确认取消:不写')
+  A.equal(H.V.get(AUGP), RAW)
+  offL(); H.dispose()
+}
+{
+  // 读失败即拒写:别的月份读不到,整个改名零写入(哪怕本月读得到)
+  _ls.set('plugin.memoflow.firstMonth', '2026-07')
+  const JUL = '闪念盒/2026-07.md'
+  const julRaw = '# 2026-07\n\n### 2026-07-01T02:00:00.000Z\n七月 #产品\n'
+  const H = mkHost({ files: [[AUGP, RAW], [JUL, julRaw]], prompt: ['项目'] })
+  const offL = H.list().subscribe(() => {})
+  await sleep(30)
+  H.fail.read = (p) => p === JUL
+  const n0 = H.reg.writes.length
+  await H.T.renameTagFlow('产品', 'rename')
+  H.fail.read = null
+  A.equal(H.reg.writes.length, n0, '有月份读失败:零写入')
+  A.equal(H.reg.confirms.length, 0, '读不全不问,直接报错')
+  A.ok(H.reg.notes.some(([m]) => String(m).includes('没有改动')), '告诉用户没改动')
+  A.equal(H.V.get(AUGP), RAW, '本月文件一字未动')
+  offL(); H.dispose()
+
+  // 折叠宿主:读失败变成 null,缓存证词说这个月有数据 → 同样拒写
+  const cache = JSON.stringify({ v: 2, days: { '2026-07-01': 1, '2026-08-01': 1 }, tags: {}, total: 2, builtAt: 1 })
+  const H2 = mkHost({ files: [[AUGP, RAW], [CACHEP, cache]], prompt: ['项目'] })
+  const offL2 = H2.list().subscribe(() => {})
+  await sleep(30)
+  const n1 = H2.reg.writes.length
+  await H2.T.renameTagFlow('产品', 'rename')
+  A.equal(H2.reg.writes.length, n1, '折叠宿主:证词说七月有数据但读到 null,零写入')
+  A.equal(H2.V.get(AUGP), RAW)
+  offL2(); H2.dispose()
+
+  // 确认框开着时月文件变了:以写入那一刻的磁盘为准,外部新条不被覆没
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+  const H3 = mkHost({ files: [[AUGP, RAW]], prompt: ['项目'] })
+  const offL3 = H3.list().subscribe(() => {})
+  await sleep(30)
+  H3.ctx.ui.confirm = async () => { H3.V.set(AUGP, `${H3.V.get(AUGP)}\n\n### 2026-08-05T02:00:00.000Z\n确认期间写进来的 #产品\n`); return true }
+  await H3.T.renameTagFlow('产品', 'rename')
+  A.ok(H3.V.get(AUGP).includes('确认期间写进来的 #项目'), '确认期间的新条保留,也一起改名')
+  offL3(); H3.dispose()
+
+  // 写到一半失败:如实说改了多少,不说「没有改动」
+  _ls.set('plugin.memoflow.firstMonth', '2026-07')
+  const H4 = mkHost({ files: [[AUGP, RAW], [JUL, julRaw]], prompt: ['项目'] })
+  const offL4 = H4.list().subscribe(() => {})
+  await sleep(30)
+  H4.fail.write = (p) => p === AUGP
+  await H4.T.renameTagFlow('产品', 'rename')
+  H4.fail.write = null
+  A.ok(H4.V.get(JUL).includes('#项目'), '第一个月写成了')
+  A.ok(H4.reg.notes.some(([m]) => String(m).includes('只改了 1 条')), '部分失败如实报告')
+  offL4(); H4.dispose()
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+}
+{
+  // 合并:目标必须存在;同一条去重
+  const raw = mdOf(['01T02', 'x #旧 y #新'], ['02T02', 'z #旧'], ['03T02', 'w #新'])
+  const H = mkHost({ files: [[AUGP, raw]], prompt: ['不存在', '新'] })
+  const offL = H.list().subscribe(() => {})
+  await sleep(30)
+  await H.T.renameTagFlow('旧', 'merge')
+  A.equal(H.V.get(AUGP), raw, '合并目标不存在:不写')
+  await H.T.renameTagFlow('旧', 'merge')
+  const out = H.V.get(AUGP)
+  A.ok(out.includes('x y #新'), '合并去重')
+  A.ok(out.includes('z #新') && out.includes('w #新'))
+  A.ok(!out.includes('#旧'))
+  offL(); H.dispose()
+  const H2 = mkHost({ files: [[AUGP, raw]], prompt: ['#1', '旧/子'] })
+  const offL2 = H2.list().subscribe(() => {})
+  await sleep(30)
+  await H2.T.renameTagFlow('旧', 'rename')
+  await H2.T.renameTagFlow('旧', 'rename')
+  A.equal(H2.V.get(AUGP), raw, '非法名字、改到自己子标签下:都不写')
+  offL2(); H2.dispose()
+}
+
+// ── ChatBox:新字段 / 句柄探测回退 / 语音进输入框不直接发 ──
+{
+  globalThis.window = { tangu: { transcribeAudio: async () => '语音转写文本' } }
+  const stream = { getTracks: () => [{ stop() {} }] }
+  navigator.mediaDevices.getUserMedia = async () => stream
+  globalThis.Blob = globalThis.Blob || class {}
+  const H = mkHost({ files: [[AUGP, TAGGED]], chatBox: 'new' })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const box = H.reg.boxes[0]
+  A.ok(box, '新宿主挂 mountChatBox')
+  A.equal(box.opts.submitOn, 'enter', 'Enter 发送')
+  A.equal(box.opts.modelPicker, false, '不显示模型选择')
+  A.equal(box.opts.suggest.trigger, '#', '# 触发补全')
+  A.equal(byTag(el, 'textarea').length, 0, '不再画自己的 textarea')
+  A.equal(byAttr(box.toolbar, 'data-voice').length, 1, '语音钮进 toolbar')
+  const sg = box.opts.suggest.items('产')
+  A.deepEqual(sg.map((x) => x.label), ['#产品', '#产品/用户', '#产品/路线图'], '补全按次数排,段首命中')
+  A.deepEqual(Object.keys(sg[0]).sort(), ['hint', 'id', 'insert', 'label', 'value'], '补全行形状(与宿主的约定,README 有记录)')
+  A.equal(sg[0].insert, '#产品 ')
+  const hashBtn = findAll(box.toolbar, (c) => c.tag === 'button' && c.attrs['aria-label'] === '打标签')[0]
+  hashBtn.listeners.click[0]()
+  A.deepEqual(box.inserted, ['#'], '# 按钮走 insertText')
+  A.equal(box.focused, 1, '# 按钮后焦点回输入框')
+  box.opts.onChange({ text: '已有字' })
+  hashBtn.listeners.click[0]()
+  A.equal(box.inserted[1], ' #', '有字时补空格,否则 # 不算标签')
+  box.opts.onChange({ text: '' })
+  A.equal(await box.opts.onSubmit({ text: '从 ChatBox 记下 #产品' }), true, '提交成功返回 true,宿主清空')
+  await sleep(10)
+  A.ok(H.V.get(AUGP).includes('从 ChatBox 记下 #产品'))
+  A.ok(byAttr(el, 'data-memo').some((r) => r.textContent.includes('从 ChatBox 记下')), '记下后时间线更新')
+  H.fail.read = (p) => p === AUGP
+  A.equal(await box.opts.onSubmit({ text: '写不进去' }), false, '落库失败返回 false,草稿留着')
+  H.fail.read = null
+  A.ok(!H.V.get(AUGP).includes('写不进去'))
+  // 语音:转写文字进输入框,不直接发
+  const n0 = T.parseMonth(H.V.get(AUGP)).memos.length
+  box.inserted.length = 0
+  const vb = byAttr(box.toolbar, 'data-voice')[0]
+  const realWav = globalThis.AudioContext
+  globalThis.AudioContext = class { async decodeAudioData() { return { duration: 1, length: 16000 } } async close() {} }
+  globalThis.OfflineAudioContext = class {
+    constructor() { this.destination = {} }
+    createBufferSource() { return { connect() {}, start() {} } }
+    async startRendering() { return { getChannelData: () => new Float32Array(1600).fill(0.5) } }
+  }
+  const realMR = globalThis.MediaRecorder
+  globalThis.MediaRecorder = class { constructor() { this.mimeType = 'audio/webm' } start() {} stop() { this.ondataavailable({ data: { size: 4 } }); this.onstop() } }
+  globalThis.Blob = class { constructor(p) { this.p = p } async arrayBuffer() { return new ArrayBuffer(8) } }
+  vb.listeners.pointerdown[0]({ preventDefault() {} })
+  await sleep(10)
+  vb.listeners.pointerdown[0]({ preventDefault() {} })
+  await sleep(30)
+  globalThis.MediaRecorder = realMR; globalThis.AudioContext = realWav
+  A.deepEqual(box.inserted, ['语音转写文本'], '语音转写走 insertText')
+  A.equal(T.parseMonth(H.V.get(AUGP)).memos.length, n0, '语音不直接发出')
+  off()
+  A.equal(box.disposed, 1, '卸载时收回 ChatBox')
+  H.dispose()
+
+  // 旧宿主:有 mountChatBox 但不认新字段 → 收掉,用自己的 textarea
+  const H2 = mkHost({ chatBox: 'old' })
+  const el2 = mkEl('div')
+  const off2 = H2.view('memos').mount(el2)
+  await sleep(20)
+  A.equal(H2.reg.boxes[0].disposed, 1, '句柄没有 insertText:当场收掉(模型选择藏不掉)')
+  A.equal(byTag(el2, 'textarea').length, 1, '退回自己的 textarea')
+  off2(); H2.dispose()
+
+  // 回退输入框的 # 补全
+  const H3 = mkHost({ files: [[AUGP, TAGGED]] })
+  const el3 = mkEl('div')
+  const off3 = H3.view('memos').mount(el3)
+  await sleep(20)
+  const ta = byTag(el3, 'textarea')[0]
+  A.equal(byAttr(el3, 'data-voice').length, 1, 'textarea 路径语音钮仍在')
+  ta.value = '今天 #产'
+  ta.listeners.input.forEach((f) => f())
+  const chip = findAll(el3, (c) => /mf-suggest/.test(c.className || ''))[0].children[0]
+  A.equal(chip.textContent, '#产品', '回退路径也有 # 补全')
+  chip.listeners.click[0]()
+  A.equal(ta.value, '今天 #产品 ', '点补全替换半截标签')
+  off3(); H3.dispose()
+}
+
+// ── Mini M2:quick 视图 · 跟容器走的断点 · 记完留在原地 · 带筛选到主面板 ──
+{
+  globalThis.window = { tangu: {} }
+  const space = JSON.parse(readFileSync(new URL('./spaces/memoflow/space.json', import.meta.url), 'utf8'))
+  A.deepEqual(space.name, { zh: '闪念盒', en: 'MemoFlow' })
+  A.equal(space.mini.view.type, 'plugin:memoflow:quick')
+  A.equal(space.mini.mainView.type, 'plugin:memoflow:memos')
+  A.ok(space.mini.name.zh && space.mini.name.en, 'mini name 中英都有')
+  A.ok(!space.requires.views.includes('plugin:memoflow:quick'), 'Mini 视图不进 requires.views')
+  A.equal(space.layout.left[0].params.mode, 'plugin:memoflow:memos', '左栏是列表源')
+  A.equal(space.layout.right[0].type, 'plugin:memoflow:activity', '右栏是活动视图')
+  const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'))
+  A.equal(manifest.version, '2.0.0')
+  A.equal(manifest.onboarding.steps.length, manifest.onboarding.en.steps.length, 'onboarding 中英同数')
+  A.ok(!/🎙/.test(JSON.stringify(manifest)), 'onboarding 不再提 emoji 按钮')
+
+  let ro = null
+  globalThis.ResizeObserver = class { constructor(cb) { this.cb = cb; ro = this } observe() {} disconnect() { this.gone = true } }
+  const today = '2026-08-06'
+  const files = [[AUGP, mdOf(['01T02', '旧的 #设计'], ['01T03', '旧的二 #读书'], ['06T02', '今天的 #设计'], ['06T03', '今天没标签'])]]
+  const H = mkHost({ files, chatBox: 'new', caps: ['tree'] })
+  const params = { tag: '' }
+  const view = { surface: 'mini', getParams: () => params, setParams: (p) => Object.assign(params, p) }
+  const el = mkEl('div')
+  const off = H.view('quick').mount(el, view)
+  await sleep(30)
+  const root = el.children.find((c) => c.className === 'mf-q')
+  const size = (w, h2) => ro.cb([{ contentRect: { width: w, height: h2 } }])
+  const rows = () => byAttr(el, 'data-memo').map((r) => r.textContent)
+  A.equal(rows().length, 2, '缺省只列今天')
+  A.ok(!el.textContent.includes('旧的'), '今天之外的不列')
+  const chips = () => findAll(el, (c) => /mf-chip/.test(c.className || ''))
+  A.equal(chips()[0].textContent, '今天', '第一颗是今天')
+  A.ok(chips()[0].className.includes('on'))
+  size(320, 420)
+  A.equal(root.attrs['data-tiny'], '0')
+  size(260, 160)
+  A.equal(root.attrs['data-tiny'], '1', '高度 < 240 只留输入框(不写死 320×420)')
+  size(260, 239); A.equal(root.attrs['data-tiny'], '1')
+  size(260, 240); A.equal(root.attrs['data-tiny'], '0', '断点是 240')
+  size(640, 560)
+  A.equal(rows().length, 4, '宽度 ≥ 480 显示全部')
+  A.ok(findAll(el, (c) => c.className === 'mf-day').length >= 2, '宽时按日分组')
+  A.equal(chips()[0].textContent, '全部')
+  size(479, 560)
+  A.equal(rows().length, 2, '断点是 480')
+  await H.reg.boxes[0].opts.onSubmit({ text: '在 Mini 记的 #设计' })
+  await sleep(10)
+  A.ok(rows()[0].includes('在 Mini 记的'), '记完留在 Mini,新行在最上面')
+  A.ok(rows()[0].includes('刚刚'), '确认行写「刚刚」')
+  A.equal(H.reg.boxes[0].focused, 0, '记完不动焦点')
+  const tagChip = chips().find((c) => c.textContent === '设计')
+  tagChip.listeners.click[0]()
+  await sleep(5)
+  A.equal(params.tag, '设计', '选标签写进参数,「在主面板显示」带过去')
+  A.equal(rows().length, 3, '标签筛选跨日')
+  // 主视图:带着参数打开 + 参数变化 + 清除筛选把参数清掉
+  const mainEl = mkEl('div')
+  const cbs = []
+  const offMain = H.view('memos').mount(mainEl, { getParams: () => params, setParams: (p) => Object.assign(params, p), onParamsChanged: (f) => { cbs.push(f); return () => {} } })
+  await sleep(20)
+  A.deepEqual(H.T.nav.tags, ['设计'], '主视图接住 Mini 带来的筛选')
+  H.T.setNav({ tags: [] })
+  A.equal(params.tag, '', '清除筛选后定位参数也清掉')
+  params.tag = '读书'
+  cbs[0]()
+  A.deepEqual(H.T.nav.tags, ['读书'], 'onParamsChanged 不重挂也跟上')
+  // 同窗口两个视图:一处记下另一处更新
+  await H.reg.boxes[1].opts.onSubmit({ text: '主视图记的 #设计' })
+  await sleep(10)
+  A.ok(rows().some((s) => s.includes('主视图记的')), '主视图记下,Mini 跟着更新')
+  offMain(); off()
+  A.equal(ro.gone, true, '卸载时断开 ResizeObserver')
+  H.dispose()
+  delete globalThis.ResizeObserver
+  void today
+}
+
+// ── 跨窗口与外部改动:storage pulse / watchFile ──
+{
+  const listeners = {}
+  globalThis.window = { tangu: {}, addEventListener: (k, f) => { listeners[k] = f }, removeEventListener: (k) => { delete listeners[k] } }
+  const H = mkHost({ files: [[AUGP, mdOf(['05T02', '一条'])]], watch: true })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const rows = () => byAttr(el, 'data-memo').length
+  A.equal(rows(), 1)
+  H.V.set(AUGP, mdOf(['05T02', '一条'], ['05T03', 'Mini 窗口记的']))
+  A.equal(typeof listeners.storage, 'function', '订了 storage 事件')
+  listeners.storage({ key: 'plugin.memoflow.pulse', newValue: '2026-08|x' })
+  await sleep(10)
+  A.equal(rows(), 2, '另一个窗口写完,这边刷新')
+  H.V.set(AUGP, mdOf(['05T02', '一条'], ['05T03', 'Mini 窗口记的'], ['05T04', 'Agent 写的']))
+  H.reg.watch.get(AUGP)()
+  await sleep(10)
+  A.equal(rows(), 3, 'Agent 改文件走 watchFile 刷新')
+  await H.T.addMemo('本窗口写一条')
+  A.ok(_ls.get('plugin.memoflow.pulse').startsWith('2026-08|'), '写完留 pulse 给别的窗口')
+  off()
+  A.equal(H.reg.watch.size, 0, '卸载退订 watchFile')
+  A.equal(listeners.storage, undefined, '卸载退订 storage')
+  H.dispose()
+  globalThis.window = { tangu: {} }
+}
+
+// ── 手机:单列、输入贴底、标签走宿主下拉、左栏摊平、操作进 ⋯ ──
+{
+  globalThis.window = { tangu: { mobile: true } }
+  const H = mkHost({ files: [[AUGP, TAGGED]], chatBox: 'new' })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const root = el.children.find((c) => c.className === 'mf-root')
+  A.equal(root.attrs['data-phone'], '1', '手机标记')
+  const dock = root.children.find((c) => c.className === 'mf-dock')
+  A.ok(dock && findAll(dock, (c) => c.className === 'mf-composer').length === 1, '输入框在贴底的 dock 里')
+  const pick = H.reg.controls[0]
+  A.ok(pick && pick.c.type === 'select', '标签走宿主下拉(安卓原生底部抽屉,抓手和系统返回归宿主)')
+  A.ok(pick.c.options.some((x) => x.label.startsWith('产品 / 路线图')), '手机上摊平成「产品 / 路线图」')
+  pick.c.onChange('产品/路线图')
+  await sleep(10)
+  A.deepEqual(H.T.nav.tags, ['产品/路线图'])
+  A.equal(pick.c.value, '产品/路线图', '选中态回写下拉')
+  pick.c.onChange('')
+  await sleep(10)
+  A.deepEqual(H.T.nav.tags, [])
+  const flat = H.T.listRows()
+  A.ok(flat.every((r) => !r.parent && !r.kind), '层级走不了原生整屏:列表源摊平')
+  A.ok(flat.some((r) => r.title === '产品 / 路线图'))
+  const row0 = byAttr(el, 'data-memo')[0]
+  const moreBtn = findAll(row0, (c) => c.tag === 'button')
+  A.equal(moreBtn.length, 1, '手机上每行只有一颗 ⋯,不搬桌面的横排按钮')
+  moreBtn[0].listeners.click[0]()
+  A.equal(H.reg.menus.at(-1).items.length, 5, '五个操作进菜单(安卓上是原生抽屉)')
+  A.ok(H.reg.menus.at(-1).at.anchor === moreBtn[0])
+  off(); H.dispose()
+
+  // 手机但宿主没有下拉:退回主区芯片
+  const H2 = mkHost({ files: [[AUGP, TAGGED]], control: false })
+  const el2 = mkEl('div')
+  const off2 = H2.view('memos').mount(el2)
+  await sleep(20)
+  A.ok(findAll(el2, (c) => /mf-chip/.test(c.className || '') && c.textContent === '产品 / 路线图').length === 1, '没有 mountControl:摊平的标签芯片')
+  off2(); H2.dispose()
+  globalThis.window = { tangu: {} }
+}
+
+// ── 动效:时长、曲线、减少动态效果(照 play.html) ──
+{
+  ANIM.on = true
+  const H = mkHost({ files: [[AUGP, TAGGED]] })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const durs = () => ANIM.log.map((a) => a.ms)
+  const frames = () => ANIM.log.map((a) => a.kf)
+  ANIM.log.length = 0
+  H.T.setNav({ tags: ['设计'] })
+  await sleep(5)
+  A.ok(durs().includes(120) && durs().includes(200), `筛选:淡出 120 + 收高 200(见 ${durs()})`)
+  A.ok(ANIM.log.some((a) => a.ms === 120 && a.easing === 'cubic-bezier(.33,1,.68,1)'), '淡出用 calm 曲线')
+  A.ok(ANIM.log.some((a) => a.ms === 200 && a.easing === 'cubic-bezier(.22,1,.36,1)'), '高度用 surface 曲线')
+  H.T.setNav({ tags: [] })
+  await sleep(5)
+  // 记下:新行长高 320,飞行 420
+  ANIM.log.length = 0
+  const ta = byTag(el, 'textarea')[0]
+  ta.value = '飞一条'
+  ta.listeners.keydown[0]({ key: 'Enter', shiftKey: false, preventDefault() {} })
+  await sleep(10)
+  A.ok(durs().includes(320), `记下:新行长高 320(见 ${durs()})`)
+  A.ok(durs().includes(420), '记下:飞行 420')
+  A.ok(frames().some((k) => /^translate\(/.test(String(k[1].transform))), '飞行是位移')
+  A.ok(!findAll(el, (c) => c.className === 'mf-fly').length, '飞完收掉')
+  const fresh = byAttr(el, 'data-memo')[0]
+  A.ok(fresh.textContent.includes('刚刚'), '新行写「刚刚」')
+  // 回顾牌堆
+  ANIM.log.length = 0
+  _ls.delete('plugin.memoflow.reviewDone')
+  off(); H.dispose()
+  const julyRows = ['# 2026-07', '']
+  for (let i = 0; i < 6; i++) julyRows.push(`### 2026-07-1${i}T02:00:00.000Z`, `旧念 ${i}`, '')
+  _ls.set('plugin.memoflow.firstMonth', '2026-07')
+  const H2 = mkHost({ files: [['闪念盒/2026-07.md', julyRows.join('\n')]] })
+  const el2 = mkEl('div')
+  const off2 = H2.view('memos').mount(el2)
+  await sleep(30)
+  ANIM.log.length = 0
+  const top = byAttr(el2, 'data-review').find((c) => !c.attrs['aria-hidden'])
+  findAll(top, (c) => c.tag === 'button' && c.textContent === '跳过')[0].listeners.click[0]()
+  await sleep(10)
+  A.ok(durs().includes(250) && durs().includes(180), `回顾:顶牌滑走 180,后牌上移 250(见 ${durs()})`)
+  A.ok(frames().some((k) => k[1].transform === 'translateX(28px)'), '顶牌向右滑走')
+  // 处理到 0 张:整块收起
+  for (let i = 0; i < 6; i++) {
+    const c = byAttr(el2, 'data-review').find((x) => !x.attrs['aria-hidden'])
+    if (!c) break
+    findAll(c, (b) => b.tag === 'button' && b.textContent === '跳过')[0].listeners.click[0]()
+    await sleep(10)
+  }
+  A.equal(byAttr(el2, 'data-review').length, 0, '0 张整块收起')
+  A.equal(_ls.get('plugin.memoflow.reviewDone'), '2026-08-06')
+  off2(); H2.dispose()
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+  _ls.delete('plugin.memoflow.reviewDone')
+
+  // 减少动态效果:位移全关,高度不补间,只留淡入淡出
+  globalThis.matchMedia = (q) => ({ matches: /prefers-reduced-motion/.test(q) })
+  const H3 = mkHost({ files: [[AUGP, TAGGED]] })
+  const el3 = mkEl('div')
+  const off3 = H3.view('memos').mount(el3)
+  await sleep(30)
+  ANIM.log.length = 0
+  H3.T.setNav({ tags: ['设计'] })
+  await sleep(5)
+  const ta3 = byTag(el3, 'textarea')[0]
+  H3.T.setNav({ tags: [] })
+  await sleep(5)
+  ta3.value = '安静地记一条'
+  ta3.listeners.keydown[0]({ key: 'Enter', shiftKey: false, preventDefault() {} })
+  await sleep(10)
+  A.ok(ANIM.log.length > 0, '减少动态效果仍有淡入淡出')
+  A.ok(ANIM.log.every((a) => a.kf.every((f) => !('transform' in f) && !('height' in f))), '减少动态效果:没有位移也没有高度补间')
+  A.ok(ANIM.log.every((a) => a.ms <= 120), '减少动态效果:时长封顶 120')
+  off3(); H3.dispose()
+  delete globalThis.matchMedia
+  ANIM.on = false
+}
+
+// ── 主视图骨架:重建缓存进 ⋯ 菜单,草稿不被刷新吃掉 ──
+{
+  const H = mkHost({ files: [[AUGP, TAGGED]] })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const head = H.reg.heads[0]
+  A.ok(!byTag(el, 'button').some((b) => b.textContent === '重建缓存'), '重建缓存不占主区')
+  const more = findAll(head.actions, (c) => c.tag === 'button' && c.attrs['aria-label'] === '更多')[0]
+  more.listeners.click[0]()
+  A.equal(H.reg.menus[0].items[0].label, '重建缓存', '收进 ⋯ 菜单')
+  A.ok(!el.textContent.includes('显示归档'), '「显示归档」变成左栏「已归档」')
+  const ta = byTag(el, 'textarea')[0]
+  ta.value = '还没发出去的草稿'
+  await H.T.addMemo('别处落的一条')
+  await sleep(10)
+  A.equal(byTag(el, 'textarea')[0], ta, '局部更新:输入框不重建')
+  A.equal(ta.value, '还没发出去的草稿', '记下 / 刷新不吃输入框草稿')
+  off()
+  A.equal(head.gone, true, '卸载收回视图头')
+  H.dispose()
+}
+
+console.log('check ok — 3 视图/3 命令/1 设置/状态栏/成就 契约 + 月文件往返(含前言/Amadeus 块标记四形态) + 标签 + seed 回顾(同日冻结) + 缓存等式 + 跨年月序 + 删除保全 + XSS + P0 写前防线(ioFail 拒写/折叠宿主缓存证词/ensureCacheFile 不覆写/增量补丁不清证词/P0 链条闭环) + P1 变更读不到一律拒改 + 并发串行 + IME/双Enter 闸 + 语音双姿势 + MediaRecorder 抛出停流 + digest 嵌套围栏 + 转笔记不覆写 + 双旧宿主降级 + 2.0(解析对账 · 前缀匹配 · 缓存升级 · 左栏树 · 筛选 · 改名合并写盘 · ChatBox 回退 · Mini · 跨窗口 · 手机 · 动效) + 双语(词表两侧键/占位符集合相等 · 切 en 后同一挂载视图就地变英文 · 语言订阅退干净 · zh→en→zh 逐字回归 · 切语言/并发落库不吃编辑框草稿 · 计数单复数与列表分隔符按语言 · 裸占位符扫描+调用点对账) 全部通过')
