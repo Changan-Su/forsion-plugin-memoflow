@@ -1505,8 +1505,8 @@ const RAW = [
   A.equal(byAttr(box.toolbar, 'data-voice').length, 1, '语音钮进 toolbar')
   const sg = box.opts.suggest.items('产')
   A.deepEqual(sg.map((x) => x.label), ['#产品', '#产品/用户', '#产品/路线图'], '补全按次数排,段首命中')
-  A.deepEqual(Object.keys(sg[0]).sort(), ['hint', 'id', 'insert', 'label', 'value'], '补全行形状(与宿主的约定,README 有记录)')
-  A.equal(sg[0].insert, '#产品 ')
+  A.deepEqual(Object.keys(sg[0]).sort(), ['hint', 'label', 'value'], '补全行形状(与宿主的约定,README 有记录)')
+  A.equal(sg[0].value, '#产品', 'value 带触发符:宿主用它替换「# + 已输入」')
   const hashBtn = findAll(box.toolbar, (c) => c.tag === 'button' && c.attrs['aria-label'] === '打标签')[0]
   hashBtn.listeners.click[0]()
   A.deepEqual(box.inserted, ['#'], '# 按钮走 insertText')
@@ -1841,6 +1841,21 @@ const RAW = [
   A1.dispose(); B1.dispose()
   Object.defineProperty(globalThis, 'navigator', { value: realNav, configurable: true, writable: true })
   A.ok(both.includes('主窗口记的') && both.includes('Mini 窗口记的'), '两个窗口同时记:跨窗口写锁让两条都落下')
+
+  // 锁不可用:照样记下;记的时候自己出错也只跑一次
+  Object.defineProperty(globalThis, 'navigator', { value: { ...realNav, mediaDevices: realNav.mediaDevices, locks: { request: () => Promise.reject(new Error('SecurityError')) } }, configurable: true, writable: true })
+  const L1 = mkHost()
+  await L1.T.addMemo('锁不可用也要落下')
+  A.ok(L1.V.get(AUGP).includes('锁不可用也要落下'), 'Web Lock 不可用时退回不带锁,记录不丢')
+  L1.dispose()
+  let runs = 0
+  Object.defineProperty(globalThis, 'navigator', { value: { ...realNav, mediaDevices: realNav.mediaDevices, locks }, configurable: true, writable: true })
+  const L2 = mkHost()
+  L2.ctx.app.writeFile = async () => { runs += 1; throw new Error('disk') }
+  await L2.T.addMemo('写失败').catch(() => {})
+  A.equal(runs, 1, '任务自己的失败不算锁不可用:不重跑')
+  L2.dispose()
+  Object.defineProperty(globalThis, 'navigator', { value: realNav, configurable: true, writable: true })
 
   // 扫描期间追加到先扫过的月份:写之前重读
   _ls.set('plugin.memoflow.firstMonth', '2026-07')

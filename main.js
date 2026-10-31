@@ -745,7 +745,12 @@ let writeChain = Promise.resolve()
 // Mini 是另一个窗口,writeChain 管不到它:读-改-写再套一把跨窗口的 Web Lock,否则两边各写各的会互相覆盖整月。
 function enqueueWrite(job) {
   const locks = globalThis.navigator && navigator.locks
-  const guarded = locks && locks.request ? () => locks.request(`plugin.${PLUGIN_ID}.write`, job) : job
+  const guarded = !(locks && locks.request) ? job : () => {
+    let ran = false
+    const inner = () => { ran = true; return job() }
+    // 锁本身不可用(沙箱不同源等)退回只靠 writeChain:记一条比防并发要紧
+    return locks.request(`plugin.${PLUGIN_ID}.write`, inner).catch((e) => { if (ran) throw e; return job() })
+  }
   const p = writeChain.then(guarded)
   writeChain = p.then(() => {}, () => {})
   return p
@@ -1436,7 +1441,7 @@ function memoHasTags(m, tags) {
   const own = extractTags(m.text)
   return tags.every((q) => own.some((tg) => tagMatches(tg, q)))
 }
-/** # 补全:按使用次数排,先段首命中后子串命中。形状是和宿主 ChatBox suggest 的约定(见 README)。 */
+/** # 补全:按使用次数排,先段首命中后子串命中。value 替换「触发符 + 已输入」,宿主补一个空格(shared/chatBox.ts)。 */
 function suggestTags(q) {
   const key = String(q == null ? '' : q).replace(/^#/, '').toLowerCase()
   const hit = []
@@ -1445,7 +1450,7 @@ function suggestTags(q) {
     else if (n.lower.includes(key)) hit.push([1, n])
   })
   hit.sort((a, b) => a[0] - b[0] || b[1].count - a[1].count)
-  return hit.slice(0, 8).map(([, n]) => ({ id: n.lower, label: `#${n.path}`, value: n.path, insert: `#${n.path} `, hint: String(n.count) }))
+  return hit.slice(0, 8).map(([, n]) => ({ label: `#${n.path}`, value: `#${n.path}`, hint: String(n.count) }))
 }
 
 // ── 左栏列表源的数据 ─────────────────────────────────────────────────────────
@@ -1904,7 +1909,7 @@ function mountComposer(slot, opts) {
         c.addEventListener('click', () => {
           const end = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length
           const start = end - m[1].length - 1
-          ta.value = `${ta.value.slice(0, start)}${it.insert}${ta.value.slice(end)}`
+          ta.value = `${ta.value.slice(0, start)}${it.value} ${ta.value.slice(end)}`
           draft = ta.value
           suggestRow.textContent = ''
           if (ta.focus) ta.focus()

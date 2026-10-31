@@ -128,13 +128,15 @@ sh install.sh prod    # 安装到 ~/.forsion;开发家用 sh install.sh(默认 d
 
 ## 和宿主的约定
 
-`ctx.ui.mountChatBox` 用到的新字段:`submitOn: 'enter'`、`modelPicker: false`、`toolbar(el)`、`suggest: { trigger: '#', items(q) }`、句柄的 `insertText(text)`。`items(q)` 返回:
+`ctx.ui.mountChatBox` 用到的新字段:`submitOn: 'enter'`、`modelPicker: false`、`toolbar(el)`、`suggest: { trigger: '#', items(q) }`、句柄的 `insertText(text)`,类型真源是 Genesis 的 `desktop/shared/chatBox.ts`。`items(q)` 返回:
 
 ```js
-[{ id: '产品/路线图', label: '#产品/路线图', value: '产品/路线图', insert: '#产品/路线图 ', hint: '19' }]
+[{ label: '#产品/路线图', value: '#产品/路线图', hint: '19' }]
 ```
 
-`insert` 是替换掉触发符和已输入部分的全文,`hint` 是右侧的小字。
+`value` 替换掉触发符和已输入部分,宿主补一个空格;`hint` 是右侧的小字。
+
+主窗口和 Mini 是两个窗口,靠这几样平台能力配合:`navigator.locks`(同名锁串行读-改-写月文件,要求两边同源;锁不可用时退回单窗口队列,两个窗口同时写可能互相覆盖)、`storage` 事件(`plugin.memoflow.pulse`,记完通知另一边刷新)。
 
 ## 自检
 
