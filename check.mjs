@@ -1297,6 +1297,22 @@ _ls.delete('plugin.memoflow.reviewDone')
   A.ok(flat.some((r) => r.title === '产品 / 路线图'), '平铺时写全路径')
   offOld(); old.dispose()
 
+  const fo = mkHost({ files: [[AUGP, TAGGED]], caps: ['tree', 'items', 'rename', 'folderOpen'] })
+  const offFo = fo.list().subscribe(() => {})
+  await sleep(30)
+  const foRows = fo.list().items(), foBy = (k) => foRows.find((r) => r.key === k)
+  A.equal(foBy('tag:产品').kind, 'folder', 'folderOpen:父标签自己是可选中的 folder')
+  A.equal(foBy('tag:产品').opensOnClick, true, 'folderOpen:点名字走 open')
+  A.equal(foBy('tag:产品/路线图').parent, 'tag:产品', 'folderOpen:子标签指向同一行')
+  A.ok(!foRows.some((r) => r.key.startsWith('folder:')), 'folderOpen:不再多一行「全部」')
+  offFo(); fo.dispose()
+
+  const T = H.T
+  A.equal(T.shortDay('2026-10-21').replace(/\s/g, ''), '10月21日', '同一年只写月日')
+  A.ok(/2025/.test(T.shortDay('2025-10-21')), '跨年带年份')
+  A.ok(/周/.test(T.weekDay('2026-10-28', '2026-10-31')), '一周内写星期')
+  A.ok(!/周/.test(T.weekDay('2026-10-21', '2026-10-31')), '更早的写月日')
+
   const none = mkHost()
   const offNone = none.list().subscribe(() => {})
   await sleep(30)

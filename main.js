@@ -338,6 +338,23 @@ function fmtDay(key) {
   try { return new Date(p[0], p[1] - 1, p[2], 12).toLocaleDateString(L() === 'zh' ? 'zh-CN' : 'en-US') } catch { return String(key || '') }
 }
 
+/** 时间线和回顾卡上的日期:同一年只写月日,不跟 2026/10/21 这种数据格式。 */
+function shortDay(key) {
+  const p = String(key || '').split('-').map(Number)
+  if (!p[0] || !p[1] || !p[2]) return String(key || '')
+  const zh = L() === 'zh', sameYear = p[0] === new Date(Date.now()).getFullYear()
+  if (zh) return `${sameYear ? '' : `${p[0]} 年 `}${p[1]} 月 ${p[2]} 日`
+  try { return new Date(p[0], p[1] - 1, p[2], 12).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) }) } catch { return String(key) }
+}
+/** 一周内写星期,更早的写月日。 */
+function weekDay(key, today) {
+  const p = String(key || '').split('-').map(Number), q = String(today || '').split('-').map(Number)
+  if (!p[2] || !q[2]) return shortDay(key)
+  const at = new Date(p[0], p[1] - 1, p[2], 12), days = Math.round((new Date(q[0], q[1] - 1, q[2], 12) - at) / 864e5)
+  if (days < 2 || days > 6) return shortDay(key)
+  return at.toLocaleDateString(L() === 'zh' ? 'zh-CN' : 'en-US', { weekday: L() === 'zh' ? 'short' : 'long' })
+}
+
 /** 宿主画的文案(视图标题、列表源、动作):新宿主传函数,切语言自动重算;PluginText 和 ctx.ui.icon 同一版到来。 */
 const pText = (k) => (ctx.ui && ctx.ui.icon ? () => t(k) : t(k))
 const isPhone = () => !!(globalThis.window && window.tangu && window.tangu.mobile)
@@ -1191,6 +1208,8 @@ const STYLE = `
 .mf-stats{font-size:12px;color:var(--text-faint);white-space:nowrap}
 .mf-flex1{flex:1}
 .btn.mf-ib{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;min-width:28px;padding:0 7px}
+.btn.ghost.mf-ib,.mf-racts .btn.ghost{border-color:transparent;background:transparent;box-shadow:none}
+.btn.ghost.mf-ib:hover,.mf-racts .btn.ghost:hover{background:var(--overlay-medium)}
 .mf-comp{background:var(--bg-card);border-radius:var(--radius-lg);box-shadow:var(--card-shadow);padding:12px 14px}
 .mf-crow{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--text-muted)}
 .mf-ta{display:block;width:100%;min-height:42px;max-height:220px;resize:none;padding:0;font:inherit;color:var(--text);background:transparent;border:0;outline:none}
@@ -1494,12 +1513,15 @@ function listRows(filter) {
   if (left) rows.push({ key: 'nav:review', title: t('navReview'), icon: 'clock', hint: String(left) })
   rows.push({ key: 'nav:archived', title: t('navArchived'), icon: 'archive' })
   if (treeListOk()) {
+    // 新宿主的文件夹行自己能选中;旧宿主点文件夹只开合,里面留一行「全部」筛选父标签本身
+    const folderOpens = (ctx.listCapabilities || []).includes('folderOpen')
+    const folderKey = (lower) => `${folderOpens ? 'tag' : 'folder'}:${lower}`
     const add = (n) => {
-      const parent = n.parent ? `folder:${n.parent}` : undefined
+      const parent = n.parent ? folderKey(n.parent) : undefined
       const place = parent ? { parent } : { group: tagsGroup }
       if (!n.children.length) { rows.push({ key: `tag:${n.lower}`, title: n.name, hint: String(n.count), icon: 'number', ...place }); return }
-      rows.push({ key: `folder:${n.lower}`, title: n.name, hint: String(n.count), kind: 'folder', icon: 'number', ...place })
-      rows.push({ key: `tag:${n.lower}`, title: t('tagAllUnder'), hint: String(n.count), icon: 'filter', parent: `folder:${n.lower}` })
+      rows.push({ key: folderKey(n.lower), title: n.name, hint: String(n.count), kind: 'folder', icon: 'number', ...place, ...(folderOpens ? { opensOnClick: true } : {}) })
+      if (!folderOpens) rows.push({ key: `tag:${n.lower}`, title: t('tagAllUnder'), hint: String(n.count), icon: 'filter', parent: `folder:${n.lower}` })
       n.children.forEach(add)
     }
     idx.roots.forEach(add)
@@ -2005,7 +2027,7 @@ function installStyle(el) {
 }
 const dayLabel = (k) => {
   const today = todayKey()
-  return k === today ? t('dayToday') : k === shiftDays(today, -1) ? t('dayYesterday') : fmtDay(k)
+  return k === today ? t('dayToday') : k === shiftDays(today, -1) ? t('dayYesterday') : weekDay(k, today)
 }
 /** 一行闪念的外形:时间左列 + 正文。actions 是悬停才露的那排。 */
 function memoLine(m, onTag, opts) {
@@ -2177,7 +2199,7 @@ function mountMemos(el, view) {
         rc.style.transform = `translateY(${i * 6}px) scale(${1 - i * 0.03})`
         rc.style.opacity = String(0.7 - i * 0.2)
       }
-      rc.appendChild(h('small', 'mf-rdate', t('reviewHead', { date: fmtDay(dayKeyOfIso(p.ts)), left: remain.length })))
+      rc.appendChild(h('small', 'mf-rdate', t('reviewHead', { date: shortDay(dayKeyOfIso(p.ts)), left: remain.length })))
       const tx = h('div', 'mf-rtext')
       renderMemoText(tx, p.text, null)
       rc.appendChild(tx)
@@ -2595,7 +2617,7 @@ if (globalThis.__MEMOFLOW_TEST__) {
     cacheFromMemos, bumpCacheObj, streakOf, buildDigestMessage, parseDigest, digestCorpus,
     safeHref, sanitizeFileName, renderMemoText, voiceAvailable, addMemo, quickCapture, memoToNote,
     loadAll, rebuildCacheFromStore, upgradeCacheTags, wfRoot, timeOfIso, normTag, tagMatches,
-    MSG, L, t, fmtDay, nMemos, nMonthFiles, nSubTags, joinList,
+    MSG, L, t, fmtDay, shortDay, weekDay, nMemos, nMonthFiles, nSubTags, joinList,
     buildTagIndex, suggestTags, listRows, listActiveKey, openRow, rowMenu, renameTagInText, renameTagInMonth, renameTagFlow, nav, setNav, keyedRows,
   })
 }
