@@ -2,8 +2,8 @@
  * 闪念盒 memoflow —— Forsion 桌面插件(裸 setup(ctx) 体,宿主 new Function('ctx', code) 装载)。
  *
  * flomo 式低摩擦速记:文字 + 语音进「月文件」(<工作文件夹>/YYYY-MM.md,### ISO 时间戳分节),
- * 时间线 / 标签 / 热力图 / 每日回顾再浮现 / Tangu AI 周整理。派生缓存 .memoflow-cache.json
- * 任何时候可仅凭月文件全量重建(视图里有「重建缓存」按钮)。
+ * 左栏标签树(列表源)/ 主区时间线 + 回顾牌堆 / 右栏热力图与周整理 / Mini 记 + 今天。派生缓存 .memoflow-cache.json
+ * 任何时候可仅凭月文件全量重建(⋯ 菜单里有「重建缓存」)。
  *
  * 安全:一切用户/模型产出文本只走 createElement + textContent(全文件不含任何 HTML 字符串注入面)。
  * 兼容:07-18 之后的 ctx 面一律可选链,旧宿主缺席时优雅降级(藏按钮 / 回退 ctx.app.notify)。
@@ -32,6 +32,46 @@ const MARKER_LINE = /^<!--\s*a\s+[A-Za-z0-9_-]+\s*-->\s*$/
 // 装的是**整个计数短语**(「3 条」/「3 memos」)而不是裸数字,所以两侧语序各写各的。
 const MSG = {
   zh: {
+    navAll: '全部闪念',
+    navReview: '每日回顾',
+    navArchived: '已归档',
+    navTags: '标签',
+    tagAllUnder: '全部',
+    tagFilter: '筛选这个标签',
+    tagRename: '改名',
+    tagMerge: '合并到…',
+    tagRenameTitle: '改标签名',
+    tagMergeTitle: '合并标签',
+    tagRenamePrompt: '把 #{tag} 改成',
+    tagMergePrompt: '把 #{tag} 合并到哪个已有标签',
+    tagConfirmBody: '会改动 {c}闪念:#{from} 和它的子标签都换成 #{to}。只改闪念,不改笔记。',
+    tagConfirmType: '输入 y 确认',
+    tagBadName: '标签名只能有文字、数字、_ - /,不能是纯数字',
+    tagIntoSelf: '不能改到自己的子标签下',
+    tagMergeMissing: '没有标签 #{tag},合并的目标要已经存在',
+    tagMonthGone: '文件暂不可读',
+    tagDone: '已改 {c}闪念',
+    tagFail: '没有改动:{msg}',
+    tagPartial: '只改了 {c}闪念,其余没写进去:{msg}。再改一次可以接着补完',
+    viewActivity: '活动',
+    filterCount: '{c}',
+    filterCountSub: '{c},含 {s}',
+    filterClear: '清除',
+    filterRemove: '去掉筛选 {name}',
+    hashTitle: '打标签',
+    more: '更多',
+    justNow: '刚刚',
+    deleteTitle: '删除这条闪念?删除后不可恢复',
+    reviewHead: '每日回顾 · {date} 的你 · 还剩 {left} 张',
+    heatTitle: '近 12 周',
+    statMemos: '条闪念',
+    statStreak: '天连续',
+    statGroups: '组标签',
+    weekCount: '本周 {c}',
+    weekLine: '按主题整理成周报',
+    btnStartDigest: '开始整理',
+    miniToday: '今天',
+    miniAll: '全部',
     listSep: '、',
     settingReviewCount: '每日回顾条数',
     settingReviewCountDesc: '每天从 7 天前更早的未归档闪念里抽几条回顾;0 = 关闭每日回顾',
@@ -48,13 +88,12 @@ const MSG = {
     hostTooOld: '宿主版本过旧,不支持工作台视图',
     btnDigest: 'AI 周整理',
     btnRebuild: '重建缓存',
-    btnShowArch: '显示归档',
     stats: '共 {c} · 连续 {d} 天',
-    inputPlaceholder: '现在在想什么?Enter 发送,Shift+Enter 换行,# 打标签',
+    inputPlaceholder: '现在在想什么?',
     btnSend: '记下',
-    btnVoice: '🎙 语音',
-    btnVoiceStop: '● 结束录音',
-    btnVoiceBusy: '⋯ 转写中',
+    btnVoice: '语音',
+    btnVoiceStop: '结束录音',
+    btnVoiceBusy: '转写中',
     voiceHint: '按住说话,或点击开始 / 再点结束',
     searchPlaceholder: '搜索闪念…',
     btnCancel: '取消',
@@ -105,13 +144,11 @@ const MSG = {
     loading: '加载中…',
     loadFail: '读取闪念失败',
     emptyTitle: '还没有闪念',
-    emptyHint: '上面输入框随手记一条;Enter 发送。也可以用状态栏「✎ 闪念」或命令面板「闪念盒:快速记一条」。',
+    emptyHint: '在输入框里随手记一条,Enter 发送,# 打标签。',
     noMatch: '没有匹配的闪念',
-    pinnedGroup: '📌 置顶 · {n} 条',
+    pinnedGroup: '置顶 · {n} 条',
     dayToday: '今天',
     dayYesterday: '昨天',
-    flagPinned: '置顶',
-    flagArchived: '已归档',
     actEdit: '编辑',
     actPin: '置顶',
     actUnpin: '取消置顶',
@@ -120,8 +157,6 @@ const MSG = {
     actToNote: '转笔记',
     actDelete: '删除',
     actSkip: '跳过',
-    reviewLabel: '每日回顾',
-    reviewHint: '过去的想法再看一眼 · 还剩 {left}/{total}',
     reviewDone: '今日回顾完成 ✓',
     heatCell: '{day} · {c}',
     rebuildPrompt: '重建缓存:从哪个月开始扫描(YYYY-MM)',
@@ -137,6 +172,46 @@ const MSG = {
     saveFail: '保存失败:{msg}',
   },
   en: {
+    navAll: 'All memos',
+    navReview: 'Daily review',
+    navArchived: 'Archived',
+    navTags: 'Tags',
+    tagAllUnder: 'All',
+    tagFilter: 'Filter by this tag',
+    tagRename: 'Rename',
+    tagMerge: 'Merge into…',
+    tagRenameTitle: 'Rename tag',
+    tagMergeTitle: 'Merge tag',
+    tagRenamePrompt: 'Rename #{tag} to',
+    tagMergePrompt: 'Merge #{tag} into which existing tag?',
+    tagConfirmBody: 'This changes {c}: #{from} and its sub-tags become #{to}. Only memos change, not notes.',
+    tagConfirmType: 'Type y to confirm',
+    tagBadName: 'Tag names can only use letters, digits, _ - and /, and cannot be all digits',
+    tagIntoSelf: 'A tag cannot move under itself',
+    tagMergeMissing: 'There is no #{tag} tag. The merge target must already exist.',
+    tagMonthGone: 'the file is temporarily unreadable',
+    tagDone: 'Changed {c}',
+    tagFail: 'Nothing changed: {msg}',
+    tagPartial: 'Only {c} changed; the rest could not be written: {msg}. Run it again to finish.',
+    viewActivity: 'Activity',
+    filterCount: '{c}',
+    filterCountSub: '{c}, including {s}',
+    filterClear: 'Clear',
+    filterRemove: 'Remove filter {name}',
+    hashTitle: 'Add a tag',
+    more: 'More',
+    justNow: 'Just now',
+    deleteTitle: 'Delete this memo? This cannot be undone',
+    reviewHead: 'Daily review · you on {date} · {left} left',
+    heatTitle: 'Last 12 weeks',
+    statMemos: 'memos',
+    statStreak: 'day streak',
+    statGroups: 'tag groups',
+    weekCount: 'This week: {c}',
+    weekLine: 'Organize them into a digest by theme',
+    btnStartDigest: 'Start',
+    miniToday: 'Today',
+    miniAll: 'All',
     listSep: ', ',
     settingReviewCount: 'Daily review count',
     settingReviewCountDesc: 'How many memos from 7+ days ago to resurface each day; 0 turns Daily Review off',
@@ -153,13 +228,12 @@ const MSG = {
     hostTooOld: 'This host is too old to open workbench views',
     btnDigest: 'AI Weekly Digest',
     btnRebuild: 'Rebuild Cache',
-    btnShowArch: 'Show Archived',
     stats: '{c} · {d}-day streak',
-    inputPlaceholder: "What's on your mind? Enter to send, Shift+Enter for a new line, # to tag",
+    inputPlaceholder: "What's on your mind?",
     btnSend: 'Capture',
-    btnVoice: '🎙 Voice',
-    btnVoiceStop: '● Stop',
-    btnVoiceBusy: '⋯ Transcribing',
+    btnVoice: 'Voice',
+    btnVoiceStop: 'Stop',
+    btnVoiceBusy: 'Transcribing',
     voiceHint: 'Hold to talk, or click to start and click again to stop',
     searchPlaceholder: 'Search memos…',
     btnCancel: 'Cancel',
@@ -210,13 +284,11 @@ const MSG = {
     loading: 'Loading…',
     loadFail: 'Could not load your memos',
     emptyTitle: 'No memos yet',
-    emptyHint: 'Jot one down in the box above and press Enter. You can also use the "✎ Memo" status bar button or the "MemoFlow: Quick Capture" command.',
+    emptyHint: 'Jot one down in the input box and press Enter. Type # to add a tag.',
     noMatch: 'No memos match',
-    pinnedGroup: '📌 Pinned · {n}',
+    pinnedGroup: 'Pinned · {n}',
     dayToday: 'Today',
     dayYesterday: 'Yesterday',
-    flagPinned: 'Pinned',
-    flagArchived: 'Archived',
     actEdit: 'Edit',
     actPin: 'Pin',
     actUnpin: 'Unpin',
@@ -225,8 +297,6 @@ const MSG = {
     actToNote: 'To Note',
     actDelete: 'Delete',
     actSkip: 'Skip',
-    reviewLabel: 'Daily Review',
-    reviewHint: 'Another look at older thoughts · {left}/{total} left',
     reviewDone: "Today's review is done ✓",
     heatCell: '{day} · {c}',
     rebuildPrompt: 'Rebuild cache: scan from which month? (YYYY-MM)',
@@ -257,6 +327,7 @@ function t(k, vars) {
  *  而不是裸数字 —— 中文无复数、英文有,两侧语序也不同,只有算好再塞才能两边都地道。
  *  周整理抬头也走它:`covering 1 memos` 这种会跟着产物长期留在磁盘上,不是「界面小瑕」。 */
 const nMemos = (n) => (L() === 'en' ? `${n} memo${n === 1 ? '' : 's'}` : `${n} 条`)
+const nSubTags = (n) => (L() === 'en' ? `${n} sub-tag${n === 1 ? '' : 's'}` : `${n} 个子标签`)
 const nMonthFiles = (n) => (L() === 'en' ? `${n} month file${n === 1 ? '' : 's'}` : `${n} 个月文件`)
 /** 列表分隔符按语言取:中文顿号绝不能拼进英文句子(月份清单等)。 */
 const joinList = (arr) => (arr || []).join(t('listSep'))
@@ -266,6 +337,30 @@ function fmtDay(key) {
   if (!p[0] || !p[1] || !p[2]) return String(key || '')
   try { return new Date(p[0], p[1] - 1, p[2], 12).toLocaleDateString(L() === 'zh' ? 'zh-CN' : 'en-US') } catch { return String(key || '') }
 }
+
+/** 时间线和回顾卡上的日期:同一年只写月日,不跟 2026/10/21 这种数据格式。 */
+function shortDay(key) {
+  const p = String(key || '').split('-').map(Number)
+  if (!p[0] || !p[1] || !p[2]) return String(key || '')
+  const zh = L() === 'zh', sameYear = p[0] === new Date(Date.now()).getFullYear()
+  if (zh) return `${sameYear ? '' : `${p[0]} 年 `}${p[1]} 月 ${p[2]} 日`
+  try { return new Date(p[0], p[1] - 1, p[2], 12).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) }) } catch { return String(key) }
+}
+/** 一周内写星期,更早的写月日。 */
+function weekDay(key, today) {
+  const p = String(key || '').split('-').map(Number), q = String(today || '').split('-').map(Number)
+  if (!p[2] || !q[2]) return shortDay(key)
+  const at = new Date(p[0], p[1] - 1, p[2], 12), days = Math.round((new Date(q[0], q[1] - 1, q[2], 12) - at) / 864e5)
+  if (days < 2 || days > 6) return shortDay(key)
+  return at.toLocaleDateString(L() === 'zh' ? 'zh-CN' : 'en-US', { weekday: L() === 'zh' ? 'short' : 'long' })
+}
+
+/** 宿主画的文案(视图标题、列表源、动作):新宿主传函数,切语言自动重算;PluginText 和 ctx.ui.icon 同一版到来。 */
+const pText = (k) => (ctx.ui && ctx.ui.icon ? () => t(k) : t(k))
+const isPhone = () => !!(globalThis.window && window.tangu && window.tangu.mobile)
+/** 左栏能不能画树:手机上层级列表走不了整屏,摊平成「产品 / 路线图」。 */
+const treeListOk = () => !!(ctx.listCapabilities && ctx.listCapabilities.includes('tree')) && !isPhone()
+const sidebarOk = () => !!ctx.registerListSource && treeListOk()
 
 ctx.registerSetting({ key: 'reviewCount', label: t('settingReviewCount'), type: 'number', default: 4, min: 0, max: 20, description: t('settingReviewCountDesc') })
 
@@ -433,22 +528,43 @@ function serializeMonth(ym, memos, preamble) {
   return parts.join('\n')
 }
 
-// ── 标签(#非空白串;# 后接标点/纯数字不算;行内多个都算) ────────────────────
+// ── 标签(和 Amadeus 同一口径,闪念盒自带一份,关着 Amadeus 也能用) ────────────
+// TAG_RE / NOT_TAG / normTag / tagMatches 与 Genesis shared/amadeus/links.ts 逐字同义,check.mjs 里有一组对照样例。
+// # 前面必须是行首或空白(a.com/#frag 不算);字符集到标点为止(「#设计,下周再说」只取「设计」)。
+const TAG_RE = /(?:^|\s)#([\p{L}\p{N}_/-]+)/gu
+const NOT_TAG = /^[0-9/]+$/ // #1、#1/2 不是标签
+/** 这段文字里的标签,按出现顺序去重(大小写不敏感,留最先出现的写法)。 */
 function extractTags(text) {
-  const out = []
-  const re = /#([^\s#]+)/g
+  const re = new RegExp(TAG_RE.source, TAG_RE.flags)
   const s = String(text == null ? '' : text)
+  const out = [], seen = new Set()
   let m
   while ((m = re.exec(s))) {
     const t = m[1]
-    if (/^\d+$/.test(t)) continue
-    if (/^[\p{P}\p{S}]/u.test(t)) continue
-    if (!out.includes(t)) out.push(t)
+    if (NOT_TAG.test(t)) continue
+    const k = t.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(t)
   }
   return out
 }
+/** 标签归一(用户输入的名字):去空白与前导 #;不合字符集或纯数字 → null。 */
+function normTag(raw) {
+  const t = String(raw == null ? '' : raw).trim().replace(/^#/, '')
+  return !t || !/^[\p{L}\p{N}_/-]+$/u.test(t) || NOT_TAG.test(t) ? null : t
+}
+/** 嵌套标签前缀匹配:查 work 命中 work 与 work/urgent,不命中 workshop。大小写不敏感。 */
+function tagMatches(tag, query) {
+  const t = String(tag == null ? '' : tag).toLowerCase()
+  const q = String(query == null ? '' : query).trim().replace(/^#/, '').replace(/\/+$/, '').toLowerCase()
+  return !!q && (t === q || t.startsWith(`${q}/`))
+}
 
 // ── 派生缓存(纯派生,任何时候可全量重建;增量 == 全量,check 有等式断言) ────
+// v 变了 = 派生规则变了(v2:标签解析对齐 Amadeus)。旧版缓存的 days 仍是写前防线的证词,不能当缺席;
+// 只有 tags 是错的 → upgradeCacheTags 只换 tags 表,days / total 一个字不碰。
+const CACHE_V = 2
 function bumpCacheObj(c, memo) {
   const day = dayKeyOfIso(memo.ts)
   if (day) c.days[day] = (c.days[day] || 0) + 1
@@ -457,7 +573,7 @@ function bumpCacheObj(c, memo) {
   return c
 }
 function cacheFromMemos(memos) {
-  const c = { days: {}, tags: {}, total: 0, builtAt: 0 }
+  const c = { v: CACHE_V, days: {}, tags: {}, total: 0, builtAt: 0 }
   for (const m of memos || []) bumpCacheObj(c, m)
   return c
 }
@@ -503,16 +619,19 @@ function pickReview(list, seed, count) {
 // 本会话见过的每月条数 + 每月头部原文(用户点「重建缓存」= 声明以磁盘为准,才清空)。
 const monthKnownCounts = new Map()
 const monthPreambles = new Map()
-/** 读月文件:宿主抛错原样上抛(err.ioFail = true),缺席/空文件给 null。写路径一律用它。 */
-async function readMonthRaw(ym) {
+/** 读月文件原文:宿主抛错原样上抛(err.ioFail = true)。 */
+async function readMonthText(ym) {
   // 局部变量刻意不叫 t:词表 helper 就叫 t(),重名会在 catch 里把它遮成 undefined
-  let raw
-  try { raw = await ctx.app.readFile(monthPath(ym)) }
+  try { return await ctx.app.readFile(monthPath(ym)) }
   catch (e) {
     const err = new Error(t('readMonthFail', { ym, msg: (e && e.message) || e }))
     err.ioFail = true
     throw err
   }
+}
+/** 读月文件并解析:缺席/空文件给 null。写路径一律用它。 */
+async function readMonthRaw(ym) {
+  const raw = await readMonthText(ym)
   if (!raw) return null
   const p = parseMonth(raw)
   monthPreambles.set(ym, p.preamble)
@@ -593,17 +712,26 @@ function applyCacheDelta(c, sub, add) {
   c.total = Math.max(0, (c.total || 0) - sub.total + add.total)
 }
 
-// ── 近用标签(输入区快捷 chips) ─────────────────────────────────────────────
-function recentTags() {
-  try {
-    const a = JSON.parse(getLS('recentTags', '[]'))
-    return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : []
-  } catch { return [] }
-}
-function rememberTags(tags) {
-  if (!tags || !tags.length) return
-  const next = tags.concat(recentTags().filter((t) => !tags.includes(t))).slice(0, 24)
-  setLS('recentTags', JSON.stringify(next))
+/** 旧版缓存就地升级:按新规则重算 tags。月份没读全就不动(下次打开再试),错标签留一会儿,证词不受影响。 */
+function upgradeCacheTags() {
+  return enqueueWrite(async () => {
+    let c
+    try { c = await readCacheFileRaw() } catch { return false }
+    if (!c || c.v === CACHE_V) return false
+    // 新设备上 firstMonth 还没记:缓存里最早的月份就是扫描起点,否则旧月份的标签重算不到
+    const earliest = Object.keys(c.days).sort()[0]
+    const ym = earliest ? earliest.slice(0, 7) : ''
+    if (YM_RE.test(ym) && (!firstMonth() || ym < firstMonth())) setFirstMonth(ym)
+    const all = await loadAll()
+    if (all.failedMonths.length) return false
+    // 扫描期间别的窗口可能记了一条:重读再写,旧对象上的 days 写回去会抹掉那条证词
+    const latest = await readCacheFileRaw()
+    if (!latest || latest.v === CACHE_V) return false
+    latest.tags = cacheFromMemos(flatten(all).map((x) => x.m)).tags
+    latest.v = CACHE_V
+    await writeCacheFile(latest)
+    return true
+  })
 }
 
 // ── 成就(旧宿主可选链;宿主自动加 plugin:memoflow: 前缀) ─────────────────
@@ -631,10 +759,103 @@ const bus = (() => {
 
 // ── 写通道串行队列(读-改-写全程排队:并发落库 / 视图变更绝不互相覆盖) ──────
 let writeChain = Promise.resolve()
+// Mini 是另一个窗口,writeChain 管不到它:读-改-写再套一把跨窗口的 Web Lock,否则两边各写各的会互相覆盖整月。
 function enqueueWrite(job) {
-  const p = writeChain.then(job)
+  const locks = globalThis.navigator && navigator.locks
+  const guarded = !(locks && locks.request) ? job : () => {
+    let ran = false
+    const inner = () => { ran = true; return job() }
+    // 锁本身不可用(沙箱不同源等)退回只靠 writeChain:记一条比防并发要紧
+    return locks.request(`plugin.${PLUGIN_ID}.write`, inner).catch((e) => { if (ran) throw e; return job() })
+  }
+  const p = writeChain.then(guarded)
   writeChain = p.then(() => {}, () => {})
   return p
+}
+
+// ── 共享数据:左栏、主视图、活动栏、Mini 同一份(同一窗口经 bus,跨窗口经 pulse / watchFile) ──
+const db = { map: new Map(), loading: true, error: '', started: false, pending: null, dirty: null }
+/** 换掉一个月的内容。全量加载进行中时记下来:加载的快照可能比这次写入旧,收尾要重读这个月。 */
+function setMonth(ym, list) {
+  db.map.set(ym, list)
+  if (db.dirty) db.dirty.add(ym)
+}
+let tagIdx = null
+let mainMounts = 0
+let styleHandle = null
+const listSubs = new Set()
+const notifyList = () => { for (const cb of [...listSubs]) { try { cb() } catch { /* ignore */ } } }
+const flatAll = () => flatten(db.map)
+/** 数据变了:标签索引作废,左栏与各视图都刷新。 */
+function touched(e) { tagIdx = null; notifyList(); bus.emit(e) }
+async function reloadMonth(ym) {
+  let list
+  try { list = await readMonthRaw(ym) } catch { return } // 瞬时读失败:保留现有画面,绝不当「月已清空」
+  if (list && list.length) db.map.set(ym, list)
+  else db.map.delete(ym)
+}
+/** quiet:有数据时后台刷新,界面不闪「加载中」。 */
+function loadStore(quiet) {
+  if (db.pending) return db.pending
+  if (!quiet) { db.loading = true; db.error = ''; touched({ type: 'store' }) }
+  db.pending = (async () => {
+    db.dirty = new Set()
+    try { db.map = await loadAll(); db.error = '' } catch (e) { db.error = (e && e.message) || String(e) }
+    while (db.dirty.size) { // 重读途中又有写入就再来一轮
+      const months = [...db.dirty]
+      db.dirty.clear()
+      for (const ym of months) await reloadMonth(ym)
+    }
+    db.dirty = null
+    db.loading = false
+    db.pending = null
+    const failed = db.map.failedMonths || []
+    if (failed.length) say(t('monthsFailed', { c: nMonthFiles(failed.length), list: joinList(failed) }), { level: 'warning' })
+    touched({ type: 'store' })
+  })()
+  return db.pending
+}
+// 眼见为实:首开就把缓存文件落进工作文件夹(文件树里可见,重建按钮也有对象)。
+// 只在「读成功且文件确实缺席」时播种空缓存;读失败(抛错)一律不写 —— 缓存是写前防线的
+// 第二道证词,瞬时读失败时把它覆写成空,等于亲手拆掉防线(P0 链条,check 有回归)。
+// 内容损坏但在场的文件也不动(「重建缓存」可校准),这里绝不抢救。
+async function ensureCacheFile() {
+  try {
+    const raw = await ctx.app.readFile(cachePath())
+    if (raw == null || raw === '') await writeCacheFile({ v: CACHE_V, days: {}, tags: {}, total: 0, builtAt: Date.now() })
+  } catch { /* 读失败 ≠ 缺席:什么都不写 */ }
+}
+/** 第一次用到数据时加载;之后再挂视图(refresh)就后台刷新一次,接住视图关着时 Agent 写进来的条。 */
+function ensureStore(refresh) {
+  if (db.started) { if (refresh && !db.pending) void loadStore(true); return }
+  db.started = true
+  void ensureCacheFile().then(upgradeCacheTags).catch(() => {}).then(() => loadStore())
+}
+// Mini 是另一个窗口:bus 过不去,写完留一条 pulse(localStorage 的 storage 事件只发给别的窗口)。
+// 文件被 Agent / 别的编辑器改了走 watchFile。两路都只刷新,不动画。
+const PULSE_KEY = `plugin.${PLUGIN_ID}.pulse`
+const pulse = (ym) => setLS('pulse', `${ym}|${uuid()}`)
+async function refreshFrom(ym) {
+  if (ym) await reloadMonth(ym)
+  else await loadStore(true)
+  touched({ type: 'changed' })
+}
+const onStorage = (e) => { if (e && e.key === PULSE_KEY && e.newValue) void refreshFrom(String(e.newValue).split('|')[0]) }
+let syncRefs = 0
+let offWatch = null
+function startSync() {
+  syncRefs += 1
+  if (syncRefs > 1) return
+  const ym = monthKeyOf(Date.now())
+  try { offWatch = ctx.app.watchFile ? ctx.app.watchFile(monthPath(ym), () => { void refreshFrom(ym) }) : null } catch { offWatch = null }
+  if (globalThis.window && window.addEventListener) window.addEventListener('storage', onStorage)
+}
+function stopSync() {
+  syncRefs -= 1
+  if (syncRefs > 0) return
+  if (offWatch) offWatch()
+  offWatch = null
+  if (globalThis.window && window.removeEventListener) window.removeEventListener('storage', onStorage)
 }
 
 // ── 落一条闪念(输入区 / 快速命令 / 语音共用;入队串行,防读-改-写交错) ──────
@@ -676,10 +897,11 @@ async function addMemoInner(rawText) {
       c = await rebuildCacheFromStore(await loadAll()) // 有月份读失败时它会拒绝落盘(抛错)
     }
   } catch { c = null }
-  rememberTags(extractTags(text))
   trackAchievements(c)
   ctx.activity?.log('capture', { text: text.slice(0, 60) })
-  bus.emit({ type: 'added', ym })
+  if (db.started && (!db.loading || db.dirty)) setMonth(ym, memos)
+  pulse(ym)
+  touched({ type: 'added', ym, ts: memo.ts })
   return memo
 }
 /** 状态栏 / 命令面板的最低摩擦入口:单行 prompt 直接落库,不开视图。 */
@@ -938,6 +1160,7 @@ function stopRecHard() {
 }
 
 // ── XSS 安全渲染:闪念正文 → DOM(只 createElement+textContent;标签可点过滤) ──
+const INLINE_RE = new RegExp(`${TAG_RE.source}|(https?:\\/\\/[^\\s]+)`, 'gu')
 function renderMemoText(container, text, onTag) {
   container.textContent = ''
   const lines = String(text == null ? '' : text).split('\n')
@@ -945,165 +1168,133 @@ function renderMemoText(container, text, onTag) {
     if (MARKER_LINE.test(line)) continue // Amadeus 块标记行是宿主结构数据,不当正文展示(文件里原样保留)
     const div = document.createElement('div')
     div.className = 'mf-line'
-    let rest = line
-    const re = /#([^\s#]+)|(https?:\/\/[^\s]+)/
+    // 在整行上扫,不切片:TAG_RE 带 ^,切片后 a.com/#frag 的 #frag 会被当成行首
+    const re = new RegExp(INLINE_RE.source, INLINE_RE.flags)
+    let last = 0
     let m
-    while ((m = re.exec(rest))) {
-      if (m.index > 0) div.appendChild(document.createTextNode(rest.slice(0, m.index)))
-      if (m[1] != null && !/^\d+$/.test(m[1]) && !/^[\p{P}\p{S}]/u.test(m[1])) {
+    while ((m = re.exec(line))) {
+      const isTag = m[1] != null
+      if (isTag && NOT_TAG.test(m[1])) continue // 纯数字留给后面当普通文字
+      const start = isTag ? m.index + m[0].length - m[1].length - 1 : m.index // 前导空白算文字
+      if (start > last) div.appendChild(document.createTextNode(line.slice(last, start)))
+      last = re.lastIndex
+      if (isTag) {
         const tg = document.createElement('span')
         tg.className = 'mf-tag'
         tg.textContent = `#${m[1]}`
         if (onTag) { const name = m[1]; tg.addEventListener('click', () => onTag(name)) }
         div.appendChild(tg)
-      } else if (m[2] != null) {
+      } else {
         const a = document.createElement('a')
         a.textContent = m[2]
         const href = safeHref(m[2])
         if (href) { a.setAttribute('href', href); a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer') }
         div.appendChild(a)
-      } else {
-        div.appendChild(document.createTextNode(m[0]))
       }
-      rest = rest.slice(m.index + m[0].length)
     }
-    if (rest) div.appendChild(document.createTextNode(rest))
+    if (last < line.length) div.appendChild(document.createTextNode(line.slice(last)))
     container.appendChild(div)
   }
 }
 
-// ── 主题:吃宿主 token 派生 --mf-*(bluebird 手法,含热力图色阶) ──────────────
-let _probe = null
-function parseColor(css) {
-  try {
-    const s = (css || '').trim()
-    if (!s || !globalThis.document) return null
-    if (!_probe) {
-      const c = document.createElement('canvas')
-      if (typeof c.getContext !== 'function') return null
-      c.width = c.height = 1
-      _probe = c.getContext('2d', { willReadFrequently: true })
-    }
-    if (!_probe) return null
-    _probe.fillStyle = '#000000'; _probe.fillStyle = s; const a = _probe.fillStyle
-    _probe.fillStyle = '#ffffff'; _probe.fillStyle = s
-    if (a === '#000000' && _probe.fillStyle === '#ffffff') return null
-    _probe.clearRect(0, 0, 1, 1); _probe.fillRect(0, 0, 1, 1)
-    const d = _probe.getImageData(0, 0, 1, 1).data
-    return [d[0], d[1], d[2], d[3] / 255]
-  } catch { return null }
-}
-const relL = (c) => { const g = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4) }; return 0.2126 * g(c[0]) + 0.7152 * g(c[1]) + 0.0722 * g(c[2]) }
-const contrast = (a, b) => { const x = relL(a), y = relL(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
-const onColorOf = (accent) => (contrast(accent, [255, 255, 255]) >= contrast(accent, [22, 22, 26]) ? '#ffffff' : '#16161a')
-function readableOn(fg, bg, text, min = 3) {
-  let c = [fg[0], fg[1], fg[2]]
-  for (let i = 0; i < 12 && contrast(c, bg) < min; i++) c = c.map((v, k) => v + (text[k] - v) * 0.18)
-  return `rgb(${c.map((v) => Math.round(v)).join(',')})`
-}
-function syncTheme(rootEl) {
-  if (typeof getComputedStyle === 'undefined') return
-  let cs
-  try { cs = getComputedStyle(rootEl) } catch { return }
-  const tok = (n) => ((cs.getPropertyValue && cs.getPropertyValue(n)) || '').trim()
-  const rgb = parseColor(tok('--text')) || parseColor(cs.color) || [40, 40, 40, 1]
-  const dark = relL(rgb) > 0.5
-  const bgc = parseColor(tok('--bg')) || (dark ? [23, 24, 28, 1] : [255, 255, 255, 1])
-  const rd = Math.round
-  const f = (a) => `rgba(${rd(rgb[0])},${rd(rgb[1])},${rd(rgb[2])},${a})`
-  const accent = tok('--accent') || tok('--am-accent') || (dark ? '#cfc9ff' : '#4C2585')
-  const arc = parseColor(accent) || [76, 37, 133, 1]
-  const af = (a) => `rgba(${rd(arc[0])},${rd(arc[1])},${rd(arc[2])},${a})`
-  const set = (k, v) => rootEl.style.setProperty(`--mf-${k}`, v)
-  rootEl.style.colorScheme = dark ? 'dark' : 'light'
-  set('text', tok('--text') || `rgb(${rd(rgb[0])},${rd(rgb[1])},${rd(rgb[2])})`)
-  set('text-sec', tok('--text-light') || f(0.72)); set('text-muted', tok('--text-muted') || f(0.5)); set('text-subtle', tok('--text-faint') || f(0.32))
-  set('bg', tok('--bg') || `rgb(${rd(bgc[0])},${rd(bgc[1])},${rd(bgc[2])})`)
-  set('surf', tok('--bg-card') || f(0.045)); set('surf-sub', tok('--overlay-subtle') || f(0.025))
-  set('input', tok('--overlay-light') || f(0.05)); set('hover', tok('--overlay-medium') || f(0.08))
-  set('border', tok('--border') || f(0.16)); set('border-sub', tok('--overlay-medium') || f(0.09))
-  set('fill', accent); set('on-fill', tok('--on-accent') || onColorOf(arc))
-  set('primary', readableOn(arc, bgc, rgb)); set('tint', tok('--accent-light') || af(0.13)); set('glow', af(0.22))
-  set('danger', tok('--danger') || (dark ? '#e08a7d' : '#b03a2e'))
-  set('shadow', tok('--card-shadow') || (dark ? '0 4px 20px rgba(0,0,0,.4)' : '0 2px 12px rgba(0,0,0,.08)'))
-  set('heat0', f(0.07)); set('heat1', af(0.25)); set('heat2', af(0.45)); set('heat3', af(0.68)); set('heat4', af(0.9))
-}
-function themeObserver(rootEl) {
-  syncTheme(rootEl)
-  let disc = () => {}
-  if (typeof MutationObserver !== 'undefined') {
-    const ob = new MutationObserver(() => syncTheme(rootEl))
-    for (let n = rootEl.parentElement; n; n = n.parentElement) ob.observe(n, { attributes: true, attributeFilter: ['class', 'data-mode', 'data-theme', 'style'] })
-    disc = () => ob.disconnect()
-  }
-  const mq = globalThis.window && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
-  const onMq = () => syncTheme(rootEl)
-  if (mq && mq.addEventListener) mq.addEventListener('change', onMq)
-  return () => { disc(); if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq) }
-}
-
 const STYLE = `
-.mf-root{height:100%;min-height:0;overflow:auto;color:inherit;background:var(--mf-bg);font-size:13px;line-height:1.55}
-.mf-root *{box-sizing:border-box}
-.mf-root ::-webkit-scrollbar{width:6px;height:6px}.mf-root ::-webkit-scrollbar-thumb{background:var(--mf-border);border-radius:3px}
-.mf-wrap{max-width:760px;margin:0 auto;padding:18px 20px 48px;display:flex;flex-direction:column;gap:12px}
-.mf-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.mf-title{font-size:20px;font-weight:700}
-.mf-stats{font-size:11.5px;color:var(--mf-text-muted)}
+.mf-root,.mf-q,.mf-side{color:var(--text);font-size:var(--ui-font-body);line-height:1.6}
+.mf-root *,.mf-q *,.mf-side *{box-sizing:border-box}
+.mf-root{position:relative;height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.mf-scroll{flex:1;min-height:0;overflow:auto}
+.mf-wrap{max-width:640px;margin:0 auto;padding:18px 20px 40px}
+.mf-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.mf-title{font-size:17px;font-weight:600}
+.mf-stats{font-size:12px;color:var(--text-faint);white-space:nowrap}
 .mf-flex1{flex:1}
-.mf-btn{padding:6px 12px;font:inherit;font-size:12px;color:var(--mf-text-sec);border:1px solid var(--mf-border);border-radius:10px;background:var(--mf-surf);cursor:pointer;transition:background .2s,border-color .2s,color .2s;white-space:nowrap}
-.mf-btn:hover:not(:disabled){background:var(--mf-tint);border-color:var(--mf-primary);color:var(--mf-primary)}
-.mf-btn:disabled{opacity:.5;cursor:default}
-.mf-btn.primary{color:var(--mf-on-fill);background:var(--mf-fill);border-color:transparent;font-weight:500}
-.mf-btn.primary:hover:not(:disabled){color:var(--mf-on-fill);background:var(--mf-fill);filter:brightness(1.06)}
-.mf-btn.on{background:var(--mf-tint);border-color:var(--mf-primary);color:var(--mf-primary)}
-.mf-btn.sm{padding:4px 9px;font-size:11.5px;border-radius:8px}
-.mf-card{border-radius:14px;background:var(--mf-surf);border:1px solid var(--mf-border);box-shadow:var(--mf-shadow);padding:12px}
-.mf-ta{width:100%;min-height:66px;max-height:220px;resize:none;padding:9px 12px;font:inherit;color:var(--mf-text);background:var(--mf-input);border:1.5px solid var(--mf-border);border-radius:11px;outline:none;transition:border-color .2s,box-shadow .2s}
-.mf-ta::placeholder{color:var(--mf-text-subtle)}
-.mf-ta:focus{border-color:var(--mf-primary);box-shadow:0 0 0 3px var(--mf-glow)}
-.mf-input{padding:6px 10px;font:inherit;font-size:12px;color:var(--mf-text);background:var(--mf-input);border:1.5px solid var(--mf-border);border-radius:10px;outline:none;flex:1;min-width:120px}
-.mf-input:focus{border-color:var(--mf-primary)}
+.btn.mf-ib{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;min-width:28px;padding:0 7px}
+.btn.ghost.mf-ib,.mf-racts .btn.ghost{border-color:transparent;background:transparent;box-shadow:none}
+.btn.ghost.mf-ib:hover,.mf-racts .btn.ghost:hover{background:var(--overlay-medium)}
+.mf-comp{background:var(--bg-card);border-radius:var(--radius-lg);box-shadow:var(--card-shadow);padding:12px 14px}
+.mf-crow{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--text-muted)}
+.mf-ta{display:block;width:100%;min-height:42px;max-height:220px;resize:none;padding:0;font:inherit;color:var(--text);background:transparent;border:0;outline:none}
+.mf-ta::placeholder{color:var(--text-faint)}
+.mf-edit{min-height:66px;padding:8px 10px;background:var(--overlay-light);border-radius:var(--radius-sm);margin-bottom:6px}
+.mf-input{width:100%;margin-top:12px;padding:6px 10px;font:inherit;font-size:12px;color:var(--text);background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm)}
 .mf-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.mf-chip{padding:2px 9px;border-radius:999px;background:var(--mf-tint);color:var(--mf-primary);font-size:11.5px;cursor:pointer;border:none;font-family:inherit}
-.mf-chip:hover{filter:brightness(1.08)}
-.mf-chip.x{background:var(--mf-surf);border:1px solid var(--mf-border);color:var(--mf-text-sec)}
-.mf-hint{font-size:11px;color:var(--mf-text-subtle)}
-.mf-vmsg{font-size:11px;color:var(--mf-danger);min-height:14px}
-.mf-voice.rec{color:var(--mf-danger);border-color:var(--mf-danger);animation:mfpulse 1.2s ease-in-out infinite}
+.mf-suggest{gap:6px;margin-top:8px}
+.mf-suggest:empty{display:none}
+.mf-chips{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.mf-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:var(--radius-pill);background:var(--overlay-medium);color:var(--text);font:inherit;font-size:12px;cursor:pointer;border:0;white-space:nowrap}
+.mf-chip:hover{background:var(--overlay-strong)}
+.mf-chip.on{background:var(--action-fill);color:var(--on-action)}
+.mf-vmsg{font-size:11px;color:var(--danger)}
+.mf-vmsg:empty{display:none}
+.mf-voice.rec{color:var(--danger);animation:mfpulse 1.2s ease-in-out infinite}
 @keyframes mfpulse{50%{opacity:.5}}
-.mf-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mf-text-muted)}
-.mf-rcards{display:flex;gap:10px;overflow-x:auto;padding:6px 0 2px}
-.mf-rcard{flex:0 0 230px;border:1px solid var(--mf-border-sub);border-radius:12px;padding:10px;background:var(--mf-surf-sub);display:flex;flex-direction:column;gap:6px}
-.mf-rdate{font-size:10.5px;color:var(--mf-text-subtle)}
-.mf-rtext{font-size:12px;flex:1;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-.mf-heat{display:grid;grid-template-rows:repeat(7,11px);grid-auto-flow:column;grid-auto-columns:11px;gap:3px;padding:4px 0}
-.mf-cell{width:11px;height:11px;border-radius:3px;background:var(--mf-heat0);cursor:pointer}
-.mf-cell.lv1{background:var(--mf-heat1)}.mf-cell.lv2{background:var(--mf-heat2)}.mf-cell.lv3{background:var(--mf-heat3)}.mf-cell.lv4{background:var(--mf-heat4)}
-.mf-cell.sel{outline:2px solid var(--mf-primary)}
-.mf-cell.future{visibility:hidden}
-.mf-day{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--mf-text-muted);margin:16px 2px 2px}
-.mf-memo{border:1px solid var(--mf-border-sub);border-radius:12px;padding:9px 12px;background:var(--mf-surf);margin-top:8px;transition:border-color .15s}
-.mf-memo:hover{border-color:var(--mf-primary)}
-.mf-memo.arch{opacity:.55}
-.mf-mtop{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--mf-text-muted)}
-.mf-flag{font-size:10px;padding:0 7px;border-radius:999px;background:var(--mf-tint);color:var(--mf-primary)}
-.mf-acts{margin-left:auto;display:flex;gap:2px;opacity:0;transition:opacity .15s}
-.mf-memo:hover .mf-acts{opacity:1}
-.mf-abtn{border:none;background:transparent;color:var(--mf-text-muted);cursor:pointer;font-size:11px;padding:2px 7px;border-radius:6px;font-family:inherit;white-space:nowrap}
-.mf-abtn:hover{background:var(--mf-hover);color:var(--mf-text)}
-.mf-abtn.danger:hover{color:var(--mf-danger)}
-.mf-mbody{margin-top:4px;word-break:break-word}
+.mf-review:empty{display:none}
+.mf-deck{position:relative;margin-top:12px}
+.mf-rc{position:relative;z-index:1;display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-card);box-shadow:var(--card-shadow)}
+.mf-rc.under{position:absolute;inset:0;z-index:0}
+.mf-rdate{grid-column:1/3;font-size:11px;color:var(--text-faint)}
+.mf-rtext{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.mf-racts{display:flex;gap:2px}
+.mf-flt{display:none;align-items:center;gap:8px;margin-top:14px;font-size:12px;color:var(--text-muted);flex-wrap:wrap}
+.mf-flt.on{display:flex}
+.mf-list{margin-top:4px}
+.mf-day{font-size:11px;color:var(--text-faint);padding:14px 0 4px}
+.mf-rowwrap{margin:0 -8px}
+.mf-memo{position:relative;display:grid;grid-template-columns:46px 1fr;gap:6px;padding:6px 8px;border-radius:var(--radius-sm)}
+.mf-memo.editing{display:block}
+.mf-memo:hover{background:var(--overlay-light)}
+.mf-time{color:var(--text-faint);font-size:11px;padding-top:2px;font-variant-numeric:tabular-nums}
+.mf-acts{position:absolute;right:4px;top:2px;display:flex;gap:2px;border-radius:var(--radius-sm);background:var(--bg);opacity:0;pointer-events:none;transition:opacity var(--duration-fast) var(--ease-calm,cubic-bezier(.33,1,.68,1))}
+.mf-memo:hover .mf-acts,.mf-memo:focus-within .mf-acts,.mf-acts.phone{opacity:1;pointer-events:auto}
+.mf-acts.phone{background:transparent}
+.btn.mf-abtn{min-width:24px;height:24px;padding:0 4px;font-size:11px}
+.btn.mf-abtn.danger:hover{color:var(--danger)}
+.mf-mbody{min-width:0;word-break:break-word}
 .mf-line{min-height:1.2em}
-.mf-tag{display:inline-block;background:var(--mf-tint);color:var(--mf-primary);border-radius:6px;padding:0 5px;cursor:pointer;font-size:.94em}
-.mf-tag:hover{filter:brightness(1.1)}
-.mf-mbody a{color:var(--mf-primary);word-break:break-all}
-.mf-empty{padding:44px 12px;text-align:center;color:var(--mf-text-subtle);font-size:12.5px}
-.mf-empty b{display:block;font-size:15px;color:var(--mf-text-muted);margin-bottom:8px}
-.mf-prog-head{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--mf-text-muted);margin-bottom:5px}
-.mf-prog-track{height:4px;border-radius:999px;background:var(--mf-border-sub);overflow:hidden}
-.mf-prog-fill{height:100%;width:0;border-radius:999px;background:var(--mf-primary);transition:width .5s ease-out}
-.mf-err{color:var(--mf-danger);font-size:12px}
+.mf-tag{color:var(--accent-ink);background:color-mix(in srgb,var(--accent-ink) 12%,transparent);border-radius:var(--radius-pill);padding:0 .4em;cursor:pointer;white-space:nowrap}
+.mf-mbody a{color:var(--accent-ink);word-break:break-all}
+.mf-empty{padding:44px 12px;text-align:center;color:var(--text-faint)}
+.mf-empty b{display:block;font-size:15px;font-weight:600;color:var(--text-muted);margin-bottom:8px}
+.mf-digest{margin:12px 0 0;background:var(--bg-card);border-radius:var(--radius-md);box-shadow:var(--card-shadow);padding:10px 12px}
+.mf-prog-head{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:5px}
+.mf-prog-track{height:4px;border-radius:var(--radius-pill);background:var(--overlay-medium);overflow:hidden}
+.mf-prog-fill{height:100%;width:0;border-radius:var(--radius-pill);background:var(--action-fill);transition:width var(--duration-slow) var(--ease-calm,cubic-bezier(.33,1,.68,1))}
+.mf-err{color:var(--danger);font-size:12px}
+.mf-fly{position:absolute;z-index:3;pointer-events:none;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:hidden;color:var(--text)}
+.mf-side{height:100%;overflow:auto;padding:10px 8px;color:var(--text-light)}
+.mf-cap{font-size:11px;color:var(--text-faint);padding:2px 9px 4px}
+.mf-heat{display:grid;grid-template-rows:repeat(7,14px);grid-auto-flow:column;grid-auto-columns:14px;gap:4px;padding:4px 9px}
+.mf-cell{border-radius:3px;background:var(--overlay-medium);cursor:pointer}
+.mf-cell.lv1{background:color-mix(in srgb,var(--text) 18%,transparent)}
+.mf-cell.lv2{background:color-mix(in srgb,var(--text) 32%,transparent)}
+.mf-cell.lv3{background:color-mix(in srgb,var(--text) 48%,transparent)}
+.mf-cell.lv4{background:color-mix(in srgb,var(--text) 62%,transparent)}
+.mf-cell.sel{outline:var(--focus-ring) solid var(--accent-ink)}
+.mf-cell.future{visibility:hidden}
+.mf-stat{display:flex;gap:18px;padding:10px 9px;font-size:12px;color:var(--text-muted)}
+.mf-stat b{display:block;font-size:17px;font-weight:600;color:var(--text)}
+.mf-weekcard{background:var(--overlay-light);border-radius:var(--radius-md);padding:10px 12px;margin:10px 9px}
+.mf-weekcard small{display:block;color:var(--text-faint);font-size:11px;margin-bottom:4px}
+.mf-weekgo{margin-top:8px}
+.mf-q{height:100%;min-height:0;display:flex;flex-direction:column;gap:8px;padding:10px;overflow:hidden;background:var(--bg)}
+.mf-q .mf-comp{padding:9px 11px}
+.mf-q .mf-ta{min-height:22px}
+.mf-q-rest{flex:1;min-height:0;overflow:auto}
+.mf-q[data-tiny="1"]{overflow:auto}
+.mf-q[data-tiny="1"] .mf-q-rest{display:none}
+.mf-qchips{display:flex;gap:6px;flex-wrap:nowrap;overflow:hidden;margin-bottom:6px}
+.mf-q[data-wide="1"] .mf-qchips{flex-wrap:wrap}
+.mf-q .mf-rowwrap{margin:0}
+.mf-q .mf-memo{grid-template-columns:40px 1fr}
+.mf-q .mf-day{padding-top:8px}
+.mf-root[data-phone]{font-size:14px}
+.mf-root[data-phone] .mf-wrap{max-width:none;padding:12px 16px 20px}
+.mf-root[data-phone] .mf-memo{padding-right:40px}
+.mf-root[data-phone] .btn.mf-abtn{min-width:36px;height:36px}
+.mf-root[data-phone] .mf-rc{grid-template-columns:1fr}
+.mf-root[data-phone] .mf-rdate{grid-column:1}
+.mf-root[data-phone] .mf-racts .btn{min-height:36px}
+.mf-dock{flex:none;padding:8px 12px calc(12px + env(safe-area-inset-bottom))}
+@media (prefers-reduced-motion: reduce){.mf-voice.rec{animation:none}}
 `
 
 // ── UI 构件小工具(纯 createElement 直引用,check 的 DOM 垫片可直测) ─────────
@@ -1114,401 +1305,1131 @@ function h(tag, cls, text) {
   return el
 }
 function mkBtn(label, cls, onClick) {
-  const b = h('button', `mf-btn${cls ? ' ' + cls : ''}`, label)
+  const b = h('button', `btn${cls ? ' ' + cls : ''}`, label)
+  b.setAttribute('type', 'button')
   if (onClick) b.addEventListener('click', onClick)
   return b
 }
+/** 词表图标。旧宿主没有 ctx.ui.icon → null,调用方退回文字。 */
+function mkIcon(name, size) {
+  try { return (ctx.ui && ctx.ui.icon && ctx.ui.icon(name, { size })) || null } catch { return null }
+}
+/** 只有图标的按钮:名字进 aria-label + title;没有图标词表的宿主直接写字。 */
+function iconBtn(icon, label, cls, onClick) {
+  const b = mkBtn('', `ghost sm mf-ib${cls ? ' ' + cls : ''}`, onClick)
+  const svg = mkIcon(icon, 15)
+  if (svg) b.appendChild(svg)
+  else b.textContent = label
+  b.setAttribute('aria-label', label)
+  b.setAttribute('title', label)
+  return b
+}
+/** 换语言时改图标钮的名字;没图标的宿主同时改字。 */
+function relabel(b, label) {
+  b.setAttribute('aria-label', label)
+  b.setAttribute('title', label)
+  if (!(ctx.ui && ctx.ui.icon)) b.textContent = label
+}
 
-// 每日回顾进度(模块级:同日内跨视图开关不丢「已处理」;picks = 当天首算后冻结的 ts 列表,
-// 处理动作缩小池子也绝不重抽 —— 「同一天里抽到的卡固定」是 SPEC 契约)。
+// ── 动效(时长与曲线抄 play.html;减少动态效果:位移全关,只留淡入淡出) ─────
+// WAAPI 的 easing 不认 var(),所以写字面值:surface / calm 与宿主 --ease-surface / --ease-calm 同一条曲线。
+const EASE = { surface: 'cubic-bezier(.22,1,.36,1)', calm: 'cubic-bezier(.33,1,.68,1)' }
+function calmMotion() {
+  try { return !!(globalThis.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) } catch { return false }
+}
+const motionMs = (ms) => (calmMotion() ? Math.min(ms, 120) : ms)
+const canAnimate = (el) => !!el && typeof el.animate === 'function'
+/** 动一下;元素不支持时返回已完成的 promise(落到终态由调用方兜底)。 */
+function anim(el, frames, ms, ease) {
+  if (!canAnimate(el)) return Promise.resolve()
+  const kf = calmMotion() ? frames.map((f) => { const c = { ...f }; delete c.transform; return c }) : frames
+  const a = el.animate(kf, { duration: motionMs(ms), easing: ease || EASE.surface, fill: 'backwards' })
+  return a && a.finished ? a.finished.catch(() => {}) : Promise.resolve()
+}
+/** 高度从 a 到 b。减少动态效果时不补间(高度变化也是位移)。 */
+function animHeight(el, a, b, ms) {
+  if (!canAnimate(el) || calmMotion()) return Promise.resolve()
+  el.style.overflow = 'hidden'
+  return anim(el, [{ height: `${a}px` }, { height: `${b}px` }], ms).then(() => { el.style.overflow = '' })
+}
+const heightOf = (el) => (el && el.offsetHeight) || 0
+
+/** 按 key 增量更新的一列:动效要的是「留下的行不重建」,整树重画做不到。
+ *  entries = [{ key, sig, build() }];sig 变了才重建这一行。
+ *  mode:none 直接到位 / filter 筛选(动效 2)/ add 新行长高(动效 1,由 onAdded 接飞行)/ mini(动效 6)。 */
+function keyedRows(box) {
+  const rows = new Map()
+  const exit = (wrap, mode) => {
+    if (mode !== 'filter' || !canAnimate(wrap)) { wrap.remove(); return }
+    wrap.exiting = true
+    const inner = wrap.firstChild
+    const done = () => wrap.remove()
+    if (calmMotion()) { anim(wrap, [{ opacity: 1 }, { opacity: 0 }], 120, EASE.calm).then(done); return }
+    anim(inner, [{ opacity: 1 }, { opacity: 0 }], 120, EASE.calm)
+    animHeight(wrap, heightOf(wrap), 0, 200).then(done)
+  }
+  const enter = (wrap, mode, key, onAdded) => {
+    if (!canAnimate(wrap)) return
+    const inner = wrap.firstChild
+    if (mode === 'filter') {
+      anim(inner, [{ opacity: 0 }, { opacity: 1 }], 200, EASE.calm)
+      animHeight(wrap, 0, heightOf(wrap), 200)
+    } else if (mode === 'mini') {
+      const ht = heightOf(wrap)
+      animHeight(wrap, 0, ht, 260)
+      anim(inner, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 260)
+    } else if (mode === 'add') {
+      if (calmMotion()) anim(inner, [{ opacity: 0 }, { opacity: 1 }], 120, EASE.calm)
+      else {
+        const ht = heightOf(wrap)
+        if (onAdded) onAdded(key, wrap) // 先量落点:高度补间一开始 wrap 就是 0 高
+        animHeight(wrap, 0, ht, 320)
+      }
+    }
+  }
+  return {
+    sync(entries, mode, onAdded) {
+      const want = new Set(entries.map((e) => e.key))
+      for (const [key, r] of [...rows]) { if (!want.has(key)) { rows.delete(key); exit(r.wrap, mode) } }
+      const fresh = []
+      let prev = null
+      for (const e of entries) {
+        let r = rows.get(e.key)
+        if (!r) { r = { wrap: h('div', 'mf-rowwrap'), sig: null }; rows.set(e.key, r); fresh.push(e.key) }
+        if (r.sig !== e.sig) { r.wrap.textContent = ''; r.wrap.appendChild(e.build()); r.sig = e.sig }
+        let next = prev ? prev.nextSibling : box.firstChild
+        while (next && next.exiting) next = next.nextSibling
+        if (next !== r.wrap) box.insertBefore(r.wrap, next || null)
+        prev = r.wrap
+      }
+      if (mode !== 'none') for (const key of fresh) enter(rows.get(key).wrap, mode, key, onAdded)
+    },
+    clear() { for (const r of rows.values()) r.wrap.remove(); rows.clear() },
+  }
+}
+/** 动效 1:正文从输入框飞到时间线第一条。坐标是视口 px,translate 是局部 px,要除以界面缩放(body 上的 zoom)。 */
+function flyTo(rootEl, text, from, target) {
+  if (!from || !canAnimate(target) || calmMotion() || !rootEl.getBoundingClientRect) return
+  const z = rootEl.currentCSSZoom || 1
+  const base = rootEl.getBoundingClientRect(), to = target.getBoundingClientRect()
+  const fly = h('div', 'mf-fly', text)
+  fly.style.left = `${(from.left - base.left) / z}px`
+  fly.style.top = `${(from.top - base.top) / z}px`
+  fly.style.width = `${to.width / z}px`
+  rootEl.appendChild(fly)
+  target.style.opacity = '0'
+  anim(fly, [{ transform: 'none' }, { transform: `translate(${(to.left - from.left) / z}px,${(to.top - from.top) / z}px)` }], 420)
+    .then(() => { fly.remove(); target.style.opacity = '' })
+}
+
+// ── 标签视图 ─────────────────────────────────────────────────────────────────
+/** 只有闪念(未归档)才算数;父标签 = 自身 + 子标签按条去重;大小写折叠,显示最先出现的写法。 */
+function buildTagIndex(list) {
+  const nodes = new Map()
+  const asc = (list || []).slice().sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+  for (const m of asc) {
+    const seen = new Set()
+    for (const tag of extractTags(m.text)) {
+      let lower = '', shown = ''
+      for (const seg of tag.split('/').filter(Boolean)) {
+        const parent = lower
+        lower = lower ? `${lower}/${seg.toLowerCase()}` : seg.toLowerCase()
+        shown = shown ? `${shown}/${seg}` : seg
+        let n = nodes.get(lower)
+        if (!n) { n = { lower, path: shown, name: seg, parent, count: 0, children: [] }; nodes.set(lower, n) }
+        if (!seen.has(lower)) { seen.add(lower); n.count += 1 }
+      }
+    }
+  }
+  const roots = []
+  for (const n of nodes.values()) { const p = n.parent && nodes.get(n.parent); if (p) p.children.push(n); else roots.push(n) }
+  const byCount = (a, b) => b.count - a.count || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+  for (const n of nodes.values()) n.children.sort(byCount)
+  roots.sort(byCount)
+  return { nodes, roots }
+}
+function tagIndex() {
+  if (!tagIdx) tagIdx = buildTagIndex(flatAll().map((x) => x.m).filter((m) => !m.archived))
+  return tagIdx
+}
+const walkTags = (idx, fn) => { const go = (n) => { fn(n); n.children.forEach(go) }; idx.roots.forEach(go) }
+/** 产品/路线图 → 「产品 / 路线图」:摊平显示,手机抽屉与旧宿主左栏共用。 */
+const flatTitle = (path) => path.split('/').join(' / ')
+function memoHasTags(m, tags) {
+  if (!tags.length) return true
+  const own = extractTags(m.text)
+  return tags.every((q) => own.some((tg) => tagMatches(tg, q)))
+}
+/** # 补全:按使用次数排,先段首命中后子串命中。value 替换「触发符 + 已输入」,宿主补一个空格(shared/chatBox.ts)。 */
+function suggestTags(q) {
+  const key = String(q == null ? '' : q).replace(/^#/, '').toLowerCase()
+  const hit = []
+  walkTags(tagIndex(), (n) => {
+    if (!key || n.lower.split('/').some((seg) => seg.startsWith(key))) hit.push([0, n])
+    else if (n.lower.includes(key)) hit.push([1, n])
+  })
+  hit.sort((a, b) => a[0] - b[0] || b[1].count - a[1].count)
+  return hit.slice(0, 8).map(([, n]) => ({ label: `#${n.path}`, value: `#${n.path}`, hint: String(n.count) }))
+}
+
+// ── 左栏列表源的数据 ─────────────────────────────────────────────────────────
+const nav = { view: 'all', tags: [], day: '', search: '' }
+function setNav(patch, mode) {
+  Object.assign(nav, patch)
+  notifyList()
+  bus.emit({ type: 'nav', mode: mode || 'filter' })
+}
+const clearFilters = (mode) => setNav({ tags: [], day: '', search: '' }, mode)
+/** 左栏点标签 = 替换;正文点标签 = 追加(同时满足),已在筛选里就去掉。 */
+const pickTag = (tag) => setNav({ view: 'all', tags: [tag], day: '', search: '' })
+function addTag(tag) {
+  const lower = tag.toLowerCase()
+  const has = nav.tags.some((x) => x.toLowerCase() === lower)
+  setNav({ tags: has ? nav.tags.filter((x) => x.toLowerCase() !== lower) : nav.tags.concat(tag), view: nav.view === 'review' ? 'all' : nav.view })
+}
+function reviewLeft() {
+  if (getLS('reviewDone', '') === todayKey()) return 0
+  return currentPicks().filter((m) => !reviewState.done.has(m.ts)).length
+}
+function firstLine(text) {
+  return String(text || '').split('\n').find((l) => l.trim() && !MARKER_LINE.test(l)) || ''
+}
+/** 给宿主的行。标签树:有子标签的父标签是 folder(点它只开合),所以里面放一行「全部」来筛选父标签本身。 */
+function listRows(filter) {
+  const all = flatAll()
+  if (db.loading || !all.length) return [] // 空的时候左栏不写字,主区讲空状态
+  const q = String((filter && filter.query) || '').trim().toLowerCase()
+  const idx = tagIndex()
+  const tagsGroup = t('navTags')
+  if (q) {
+    const rows = []
+    walkTags(idx, (n) => { if (n.lower.includes(q)) rows.push({ key: `tag:${n.lower}`, title: flatTitle(n.path), hint: String(n.count), icon: 'number', group: tagsGroup }) })
+    const hits = all.filter((it) => !it.m.archived && it.m.text.toLowerCase().includes(q)).sort((a, b) => (a.m.ts < b.m.ts ? 1 : -1)).slice(0, 50)
+    for (const it of hits) rows.push({ key: `memo:${it.m.ts}`, title: firstLine(it.m.text), hint: dayKeyOfIso(it.m.ts).slice(5), icon: 'zap', group: t('navAll') })
+    return rows
+  }
+  const rows = [{ key: 'nav:all', title: t('navAll'), icon: 'zap', hint: String(all.filter((it) => !it.m.archived).length) }]
+  const left = reviewLeft()
+  if (left) rows.push({ key: 'nav:review', title: t('navReview'), icon: 'clock', hint: String(left) })
+  rows.push({ key: 'nav:archived', title: t('navArchived'), icon: 'archive' })
+  if (treeListOk()) {
+    // 新宿主的文件夹行自己能选中;旧宿主点文件夹只开合,里面留一行「全部」筛选父标签本身
+    const folderOpens = (ctx.listCapabilities || []).includes('folderOpen')
+    const folderKey = (lower) => `${folderOpens ? 'tag' : 'folder'}:${lower}`
+    const add = (n) => {
+      const parent = n.parent ? folderKey(n.parent) : undefined
+      const place = parent ? { parent } : { group: tagsGroup }
+      if (!n.children.length) { rows.push({ key: `tag:${n.lower}`, title: n.name, hint: String(n.count), icon: 'number', ...place }); return }
+      rows.push({ key: folderKey(n.lower), title: n.name, hint: String(n.count), kind: 'folder', icon: 'number', ...place, ...(folderOpens ? { opensOnClick: true } : {}) })
+      if (!folderOpens) rows.push({ key: `tag:${n.lower}`, title: t('tagAllUnder'), hint: String(n.count), icon: 'filter', parent: `folder:${n.lower}` })
+      n.children.forEach(add)
+    }
+    idx.roots.forEach(add)
+  } else {
+    walkTags(idx, (n) => rows.push({ key: `tag:${n.lower}`, title: flatTitle(n.path), hint: String(n.count), icon: 'number', group: tagsGroup }))
+  }
+  return rows
+}
+function listActiveKey() {
+  if (nav.tags.length === 1) return `tag:${nav.tags[0].toLowerCase()}`
+  return nav.tags.length ? null : `nav:${nav.view}`
+}
+function openRow(item) {
+  const key = String((item && item.key) || '')
+  if (mainMounts === 0 && ctx.openView) ctx.openView('memos')
+  if (key === 'nav:all') setNav({ view: 'all', tags: [], day: '', search: '' })
+  else if (key === 'nav:review') setNav({ view: 'review', tags: [], day: '', search: '' })
+  else if (key === 'nav:archived') setNav({ view: 'archived', tags: [], day: '', search: '' })
+  else if (key.startsWith('tag:')) { const n = tagIndex().nodes.get(key.slice(4)); if (n) pickTag(n.path) }
+  else if (key.startsWith('memo:')) setNav({ view: 'all', tags: [], day: dayKeyOfIso(key.slice(5)), search: '' })
+}
+function rowMenu(item) {
+  const key = String((item && item.key) || '')
+  const lower = key.replace(/^(tag|folder):/, '')
+  if (lower === key) return []
+  const n = tagIndex().nodes.get(lower)
+  if (!n) return []
+  const out = []
+  if (key.startsWith('folder:')) out.push({ id: 'filter', label: pText('tagFilter'), icon: 'filter', run: () => { pickTag(n.path) } })
+  out.push({ id: 'rename', label: pText('tagRename'), icon: 'pencil', run: () => { void renameTagFlow(n.path, 'rename') } })
+  out.push({ id: 'merge', label: pText('tagMerge'), run: () => { void renameTagFlow(n.path, 'merge') } })
+  return out
+}
+
+// ── 标签改名 / 合并(写盘:只动标签本身,其余字节一个不变) ──────────────────
+/** 一段正文里把 from(含它的子标签)改成 to。改完和同条已有标签重复的,删掉这一处(连同它前面一个空白)。 */
+function renameTagInText(text, from, to) {
+  const s = String(text == null ? '' : text)
+  const re = new RegExp(TAG_RE.source, TAG_RE.flags)
+  const occ = []
+  let m
+  while ((m = re.exec(s))) {
+    if (NOT_TAG.test(m[1])) continue
+    const hit = tagMatches(m[1], from)
+    occ.push({ start: re.lastIndex - m[1].length, end: re.lastIndex, tag: m[1], hit, next: hit ? to + m[1].slice(from.length) : m[1] })
+  }
+  const kept = new Set(occ.filter((o) => !o.hit).map((o) => o.tag.toLowerCase()))
+  let out = '', last = 0, n = 0
+  for (const o of occ) {
+    if (!o.hit) continue
+    n += 1
+    const k = o.next.toLowerCase()
+    if (kept.has(k)) {
+      let a = o.start - 1, b = o.end // a 指向 #
+      if (a > 0 && (s[a - 1] === ' ' || s[a - 1] === '\t')) a -= 1
+      else if (s[b] === ' ' || s[b] === '\t') b += 1
+      out += s.slice(last, a)
+      last = b
+    } else {
+      kept.add(k)
+      out += s.slice(last, o.start) + o.next
+      last = o.end
+    }
+  }
+  return { text: out + s.slice(last), n }
+}
+/** 月文件原文上逐节改,不过 parse / serialize:前言、时间戳行、块标记行、哨兵、空行全都逐字留着。 */
+function renameTagInMonth(raw, from, to) {
+  const s = String(raw == null ? '' : raw)
+  const spans = []
+  let pos = 0, body = -1
+  for (const line of s.split('\n')) {
+    if (TS_LINE.test(line)) {
+      if (body >= 0) spans.push([body, pos])
+      body = pos + line.length + 1
+    }
+    pos += line.length + 1
+  }
+  if (body >= 0) spans.push([Math.min(body, s.length), s.length])
+  let out = '', last = 0, memosHit = 0
+  for (const [a, b] of spans) {
+    const r = renameTagInText(s.slice(a, b), from, to)
+    out += s.slice(last, a) + r.text
+    last = b
+    if (r.n) memosHit += 1
+  }
+  return { text: out + s.slice(last), memos: memosHit }
+}
+/** 读全部月份算出要改什么。任何一个月读不到都抛错:这一步抛了,后面一个字都不写。 */
+async function planTagRename(from, to) {
+  const nowYm = monthKeyOf(Date.now())
+  const start = firstMonth() || nowYm
+  const plan = []
+  for (const ym of monthSeq(start <= nowYm ? start : nowYm, nowYm)) {
+    const raw = await readMonthText(ym) // 抛 ioFail
+    if (!raw) {
+      // 折叠宿主把读失败变成 null:证词说这个月有数据,就当读失败
+      if (Math.max(monthKnownCounts.get(ym) || 0, await cachedMonthCount(ym)) > 0) throw new Error(t('readMonthFail', { ym, msg: t('tagMonthGone') }))
+      continue
+    }
+    const r = renameTagInMonth(raw, from, to)
+    if (r.memos) plan.push({ ym, raw, next: r.text, memos: r.memos })
+  }
+  return plan
+}
+async function applyTagRename(from, to) {
+  return enqueueWrite(async () => {
+    const plan = await planTagRename(from, to) // 确认框开着的时候文件可能变了:以此刻的磁盘为准
+    const sub = { days: {}, tags: {}, total: 0 }, add = { days: {}, tags: {}, total: 0 }
+    const seen = {} // 这些月份的日计数:缓存里没有的要补上,否则改完的月份没有防覆盖证词
+    const sum = (into, c) => {
+      for (const k of Object.keys(c.tags)) into.tags[k] = (into.tags[k] || 0) + c.tags[k]
+    }
+    let count = 0
+    for (const { ym } of plan) {
+      // 扫完全部月份要一会儿:每个月写之前重读一次,读写挨着,扫描期间追加的条不被盖掉
+      let raw, r
+      try {
+        raw = await readMonthText(ym)
+        if (!raw) throw new Error(t('readMonthFail', { ym, msg: t('tagMonthGone') }))
+        r = renameTagInMonth(raw, from, to)
+        if (r.memos) await ctx.app.writeFile(monthPath(ym), r.text)
+      } catch (e) { const err = new Error((e && e.message) || String(e)); err.partial = count; throw err } // 再改一次能接着补完:已改的不再命中
+      if (!r.memos) continue
+      const before = parseMonth(raw).memos, after = parseMonth(r.text).memos
+      const fresh = cacheFromMemos(after)
+      sum(sub, cacheFromMemos(before)); sum(add, fresh)
+      Object.assign(seen, fresh.days)
+      monthKnownCounts.set(ym, after.length) // 确认期间才出现的月份也要留证词
+      setMonth(ym, after)
+      count += r.memos
+    }
+    try {
+      const c = await readCacheFileRaw()
+      if (c && plan.length) { applyCacheDelta(c, sub, add); for (const d of Object.keys(seen)) if (!c.days[d]) { c.days[d] = seen[d]; c.total += seen[d] } c.builtAt = Date.now(); await writeCacheFile(c) }
+    } catch { /* 派生物:写不上就等「重建缓存」,闪念已经改好了 */ }
+    return count
+  })
+}
+/** 改名与合并同一条写路径,差别只在问法:合并的目标必须已经存在。 */
+async function renameTagFlow(path, mode) {
+  const merging = mode === 'merge'
+  if (!ctx.app.prompt) { say(t('quickNoPrompt'), { level: 'warning' }); return }
+  let raw
+  try { raw = await ctx.app.prompt(t(merging ? 'tagMergePrompt' : 'tagRenamePrompt', { tag: path }), merging ? '' : path) } catch { return }
+  if (raw == null || !String(raw).trim()) return
+  const to = normTag(raw)
+  if (!to) { say(t('tagBadName'), { level: 'warning' }); return }
+  const from = path
+  if (to === from) return
+  if (to.toLowerCase().startsWith(`${from.toLowerCase()}/`)) { say(t('tagIntoSelf'), { level: 'warning' }); return }
+  if (merging && !tagIndex().nodes.has(to.toLowerCase())) { say(t('tagMergeMissing', { tag: to }), { level: 'warning' }); return }
+  let plan
+  try { plan = await planTagRename(from, to) }
+  catch (e) { say(t('tagFail', { msg: (e && e.message) || e }), { level: 'error' }); return }
+  const count = plan.reduce((n, p) => n + p.memos, 0)
+  if (!count) return
+  const body = t('tagConfirmBody', { c: nMemos(count), from, to })
+  const title = t(merging ? 'tagMergeTitle' : 'tagRenameTitle')
+  let ok = false
+  if (ctx.ui && ctx.ui.confirm) ok = await ctx.ui.confirm({ title, body })
+  else {
+    let v = null
+    try { v = await ctx.app.prompt(`${body} ${t('tagConfirmType')}`, '') } catch { return }
+    ok = v != null && String(v).trim().toLowerCase() === 'y'
+  }
+  if (!ok) return
+  try {
+    const n = await applyTagRename(from, to)
+    const nextTags = nav.tags.map((q) => (tagMatches(q, from) ? to + q.slice(from.length) : q))
+    pulse('')
+    nav.tags = nextTags
+    touched({ type: 'changed' })
+    say(t('tagDone', { c: nMemos(n) }), { level: 'success' })
+  } catch (e) {
+    const msg = (e && e.message) || e
+    if (e && e.partial) { pulse(''); touched({ type: 'changed' }) }
+    say(e && e.partial ? t('tagPartial', { c: nMemos(e.partial), msg }) : t('tagFail', { msg }), { level: 'error' })
+  }
+}
+
+// ── 对闪念的修改(视图共用;写路径的防线都在 persistMonthOp) ──────────────────
+// 变更以「磁盘现状为基 + 按 ts 重放本次修改」落盘(经典 read-modify-write):
+// 并发新条天然保全;磁盘读不到(抛错或缺席)一律拒改 —— 能被改的条目必然来自一次成功读过的月文件,
+// 「读不到却要整月重写」没有正当场景;旧版曾回退陈旧 store 整月重写,覆没过外部新写的条(P1 回归)。
+async function persistMonthOp(ym, apply) {
+  await enqueueWrite(async () => {
+    let disk
+    try { disk = await readMonthRaw(ym) }
+    catch { throw new Error(t('editCanceled', { ym })) }
+    if (disk == null) throw new Error(t('editCanceledGone', { ym }))
+    const arr = disk
+    const before = cacheFromMemos(arr)
+    apply(arr)
+    setMonth(ym, arr)
+    await writeMonth(ym, arr)
+    // 缓存走增量补丁,绝不由 store 全量重建 —— store 可能缺读失败的月份,全量重建会把防覆盖证词清零(P0 链条)。
+    try {
+      const c = await readCacheFileRaw()
+      if (c) {
+        applyCacheDelta(c, before, cacheFromMemos(arr))
+        c.builtAt = Date.now()
+        await writeCacheFile(c)
+      }
+    } catch { /* 缓存读失败:跳过本次派生更新,保住证词;缓存的账「重建缓存」随时可校准 */ }
+  })
+  pulse(ym)
+}
+function findMemo(ts) {
+  for (const it of flatAll()) { if (it.m.ts === ts) return it }
+  return null
+}
+async function patchMemo(ts, patch) {
+  const it = findMemo(ts)
+  if (!it) return
+  const m = it.m
+  const prev = {}
+  for (const k of Object.keys(patch)) prev[k] = m[k]
+  try {
+    Object.assign(m, patch) // 立即反映到 UI;落盘时按 ts 在磁盘现状上重放
+    await persistMonthOp(it.ym, (arr) => {
+      const x = arr.find((y) => y.ts === ts)
+      if (x) Object.assign(x, patch)
+    })
+    touched({ type: 'changed' })
+  } catch (e) {
+    Object.assign(m, prev) // 拒改回滚:UI 与磁盘保持一致,不留「看着改成了其实没落盘」的假象
+    touched({ type: 'changed' })
+    say(t('saveFail', { msg: (e && e.message) || e }), { level: 'error' })
+  }
+}
+async function deleteMemo(ts) {
+  const it = findMemo(ts)
+  if (!it) return
+  // 确认是删除契约的一部分:没有确认框的宿主宁可不删,绝不静默单击即毁
+  let ok = false
+  if (ctx.ui && ctx.ui.confirm) ok = await ctx.ui.confirm({ title: t('deleteTitle'), body: firstLine(it.m.text).slice(0, 80), danger: true })
+  else {
+    if (!ctx.app.prompt) { say(t('deleteNoPrompt'), { level: 'warning' }); return }
+    let v
+    try { v = await ctx.app.prompt(t('deleteConfirm'), '') } catch { return }
+    ok = v != null && String(v).trim().toLowerCase() === 'y'
+  }
+  if (!ok) return
+  const prevArr = db.map.get(it.ym) || []
+  try {
+    db.map.set(it.ym, prevArr.filter((x) => x !== it.m)) // UI 先行
+    await persistMonthOp(it.ym, (arr) => {
+      const i = arr.findIndex((y) => y.ts === ts)
+      if (i >= 0) arr.splice(i, 1)
+    })
+    say(t('deleted'), { level: 'success' })
+    touched({ type: 'changed' })
+  } catch (e) {
+    db.map.set(it.ym, prevArr) // 拒改回滚:磁盘没删成,画面也不能装删了
+    touched({ type: 'changed' })
+    say(t('deleteFail', { msg: (e && e.message) || e }), { level: 'error' })
+  }
+}
+async function toNote(ts) {
+  const it = findMemo(ts)
+  if (!it) return
+  const wasArchived = it.m.archived
+  try {
+    const p = await memoToNote(it.m)
+    it.m.archived = true
+    await persistMonthOp(it.ym, (arr) => {
+      const x = arr.find((y) => y.ts === ts)
+      if (x) x.archived = true
+    })
+    say(t('toNoteOk'), { level: 'success' })
+    if (ctx.app.openFile) ctx.app.openFile(p)
+    touched({ type: 'changed' })
+  } catch (e) {
+    it.m.archived = wasArchived // 归档标没落盘就不装归档了(笔记文件若已写出则保留)
+    touched({ type: 'changed' })
+    say(t('toNoteFail', { msg: (e && e.message) || e }), { level: 'error' })
+  }
+}
+async function doRebuild() {
+  try {
+    const cur = firstMonth() || monthKeyOf(Date.now())
+    let ym = cur
+    if (ctx.app.prompt) {
+      const v = await ctx.app.prompt(t('rebuildPrompt'), cur)
+      if (v == null) return
+      ym = String(v).trim() || cur
+    }
+    if (!YM_RE.test(ym)) { say(t('rebuildBadMonth'), { level: 'warning' }); return }
+    if (ym < cur) setFirstMonth(ym)
+    // 用户主动重建 = 声明「以磁盘现状为准」:清掉写前防线的会话记忆,免得删过月文件后被拒写死锁
+    monthKnownCounts.clear()
+    monthPreambles.clear()
+    await loadStore()
+    const c = await rebuildCacheFromStore(db.map)
+    say(t('rebuildOk', { c: nMemos(c.total) }), { level: 'success' })
+    touched({ type: 'changed' })
+  } catch (e) { say(t('rebuildFail', { msg: (e && e.message) || e }), { level: 'error' }) }
+}
+
+// ── 每日回顾的取卡(模块级:同日内跨视图开关不丢「已处理」;picks = 当天首算后冻结的 ts 列表,
+// 处理动作缩小池子也绝不重抽 —— 「同一天里抽到的卡固定」是 SPEC 契约) ─────────────
 const reviewState = { day: '', done: new Set(), picks: null }
+function currentPicks() {
+  const today = todayKey() // 不叫 t:与词表 helper t() 重名
+  if (reviewState.day !== today) { reviewState.day = today; reviewState.done = new Set(); reviewState.picks = null }
+  const n = reviewCountSetting()
+  if (!n) return []
+  const all = flatAll().map((x) => x.m)
+  if (!reviewState.picks) {
+    if (db.loading) return [] // 数据没到位不冻结,免得把空集钉成「今天没得回顾」
+    reviewState.picks = pickReview(reviewEligible(all, today), seedOfDay(today), n).map((m) => m.ts)
+  }
+  // 冻结后只做过滤,不重抽:已删除的卡掉队;在时间线上被归档(而非经回顾处理)的也掉队;
+  // 经回顾动作归档/转笔记的(已进 done)留在分母里,完成判定与「还剩 N/M」才不会自我延长。
+  const byTs = new Map()
+  for (const m of all) byTs.set(m.ts, m)
+  return reviewState.picks.map((ts) => byTs.get(ts)).filter((m) => m && (!m.archived || reviewState.done.has(m.ts)))
+}
 
-// ══ 闪念盒视图 ═══════════════════════════════════════════════════════════════
-function mountMemos(el) {
+// ── 输入区(主视图与 Mini 共用) ──────────────────────────────────────────────
+/** 语音钮。桥缺席返回 null,不渲染。转写结果交给 onText,绝不直接发出。 */
+function voiceButton(onText, onMsg) {
+  if (!voiceAvailable()) return null
+  const b = mkBtn('', 'ghost sm mf-ib mf-voice', null)
+  b.setAttribute('data-voice', '1')
+  const svg = mkIcon('audio-lines', 15)
+  if (svg) b.appendChild(svg)
+  const sync = () => {
+    const label = rec.busy ? t('btnVoiceBusy') : rec.active ? t('btnVoiceStop') : t('btnVoice')
+    b.setAttribute('aria-label', label)
+    b.setAttribute('title', rec.busy || rec.active ? label : `${label} · ${t('voiceHint')}`)
+    if (!svg) b.textContent = label
+    b.disabled = !!rec.busy
+    b.classList.toggle('rec', !!rec.active)
+  }
+  sync()
+  const onDone = (text) => { onMsg(''); onText(text) }
+  const onErr = (msg) => { onMsg(msg); say(msg, { level: 'warning' }) }
+  // 两种姿势并存:按住说话(down…≥400ms…up/滑出=结束)/ 点击开始-再点结束。
+  // ptrDown 区分「指针仍按着」:点击模式下光标移出按钮绝不能结束录音(否则点击模式形同虚设)。
+  let ptrDown = false
+  b.addEventListener('pointerdown', (e) => {
+    if (e && e.preventDefault) e.preventDefault()
+    if (rec.busy) return
+    ptrDown = true
+    if (rec.active) { stopRec(false); return }
+    onMsg('')
+    void startRec(onDone, onErr, sync)
+  })
+  b.addEventListener('pointerup', () => { const held = ptrDown; ptrDown = false; if (held && rec.active && Date.now() - rec.t0 >= 400) stopRec(false) })
+  b.addEventListener('pointerleave', () => { const held = ptrDown; ptrDown = false; if (held && rec.active && Date.now() - rec.t0 >= 400) stopRec(false) })
+  b.addEventListener('pointercancel', () => { const held = ptrDown; ptrDown = false; if (held && rec.active) stopRec(true) })
+  return { el: b, sync }
+}
+/** 输入框。新宿主挂 ctx.ui.mountChatBox;认不出新字段(句柄没有 insertText,模型选择藏不掉)或没有这个接口就用自己的 textarea。
+ *  opts.send(text, fromRect):落一条,失败抛错 → 草稿留着。 */
+function mountComposer(slot, opts) {
+  const host = h('div', 'mf-composer')
+  slot.appendChild(host)
+  const vMsg = h('div', 'mf-vmsg', '')
+  let draft = ''
+  let insert = () => {}
+  let refocus = () => {}
+  const spaced = (s) => (draft && !/\s$/.test(draft) ? ` ${s}` : s)
+  const voice = voiceButton((text) => { insert(spaced(text)); refocus() }, (msg) => { vMsg.textContent = msg })
+  const hashBtn = iconBtn('number', t('hashTitle'), '', () => { insert(spaced('#')); refocus() })
+  const placeholder = () => t('inputPlaceholder')
+  const fromRect = () => { try { const r = host.getBoundingClientRect(); return { left: r.left + 14, top: r.top + 12 } } catch { return null } }
+  const fail = (e) => say(t('saveFail', { msg: (e && e.message) || e }), { level: 'error' })
+
+  let box = null
+  if (ctx.ui && ctx.ui.mountChatBox) {
+    const made = ctx.ui.mountChatBox(host, {
+      label: t('appName'), placeholder: placeholder(), submitLabel: t('btnSend'),
+      submitOn: 'enter', modelPicker: false,
+      toolbar(el) { el.appendChild(hashBtn); if (voice) el.appendChild(voice.el) },
+      suggest: { trigger: '#', items: (q) => suggestTags(q) },
+      onChange(d) { draft = String((d && d.text) || '') },
+      async onSubmit(d) {
+        try { await opts.send(d.text, fromRect()); draft = ''; return true }
+        catch (e) { fail(e); return false }
+      },
+    })
+    if (made && typeof made.insertText === 'function') box = made
+    else if (made) made.dispose()
+  }
+  let ta = null, sendBtn = null, suggestRow = null
+  if (box) {
+    insert = (s) => box.insertText(s)
+    refocus = () => box.focus()
+  } else {
+    const card = h('div', 'mf-comp')
+    ta = h('textarea', 'mf-ta')
+    ta.setAttribute('rows', opts.compact ? '1' : '2')
+    ta.setAttribute('aria-label', t('appName'))
+    const autoGrow = () => { if (typeof ta.scrollHeight === 'number' && ta.style) { ta.style.height = 'auto'; ta.style.height = `${Math.min(220, ta.scrollHeight)}px` } }
+    suggestRow = h('div', 'mf-row mf-suggest')
+    const showSuggest = () => {
+      suggestRow.textContent = ''
+      const caret = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length
+      const m = /(?:^|\s)#([\p{L}\p{N}_/-]*)$/u.exec(ta.value.slice(0, caret))
+      if (!m) return
+      for (const it of suggestTags(m[1]).slice(0, 6)) {
+        const c = h('button', 'mf-chip', it.label)
+        c.setAttribute('type', 'button')
+        c.addEventListener('click', () => {
+          const end = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length
+          const start = end - m[1].length - 1
+          ta.value = `${ta.value.slice(0, start)}${it.value} ${ta.value.slice(end)}`
+          draft = ta.value
+          suggestRow.textContent = ''
+          if (ta.focus) ta.focus()
+        })
+        suggestRow.appendChild(c)
+      }
+      anim(suggestRow, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], 150)
+    }
+    ta.addEventListener('input', () => { draft = String(ta.value || ''); autoGrow(); showSuggest() })
+    let sending = false // Enter 通道重入闸:双击 Enter / Enter+按钮同击只落一条
+    const send = async () => {
+      if (sending) return
+      const v = ta.value
+      if (!v || !String(v).trim()) return
+      sending = true
+      sendBtn.disabled = true
+      const from = fromRect()
+      ta.value = ''
+      draft = ''
+      autoGrow()
+      suggestRow.textContent = ''
+      try { await opts.send(v, from) }
+      catch (e) { ta.value = v; draft = v; autoGrow(); fail(e) }
+      finally { sending = false; sendBtn.disabled = false }
+    }
+    // 输入法合成态的 Enter(选候选词上屏)不算发送:isComposing / keyCode 229 双闸
+    ta.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.shiftKey) return
+      if (e.isComposing || e.keyCode === 229) return
+      if (e.preventDefault) e.preventDefault()
+      void send()
+    })
+    sendBtn = mkBtn(t('btnSend'), 'primary sm', () => { void send() })
+    const toolRow = h('div', 'mf-crow')
+    toolRow.appendChild(hashBtn)
+    if (voice) toolRow.appendChild(voice.el)
+    toolRow.appendChild(h('span', 'mf-flex1'))
+    toolRow.appendChild(sendBtn)
+    card.appendChild(ta)
+    card.appendChild(toolRow)
+    host.appendChild(card)
+    host.appendChild(suggestRow)
+    insert = (s) => { ta.value = `${ta.value || ''}${s}`; draft = ta.value; autoGrow(); showSuggest() }
+    refocus = () => { if (ta.focus) ta.focus() }
+    ta.setAttribute('placeholder', placeholder())
+  }
+  host.appendChild(vMsg)
+  return {
+    host,
+    relabel() {
+      if (box) box.update({ label: t('appName'), placeholder: placeholder(), submitLabel: t('btnSend') })
+      else {
+        ta.setAttribute('placeholder', placeholder())
+        ta.setAttribute('aria-label', t('appName'))
+        sendBtn.textContent = t('btnSend')
+      }
+      relabel(hashBtn, t('hashTitle'))
+      if (voice) voice.sync() // 录音中也安全:它按 rec 状态重算,不会把「结束录音」写回「语音」
+    },
+    dispose() { if (box) box.dispose(); if (rec.active || rec.busy) stopRecHard() },
+  }
+}
+/** 周整理进度 / 失败卡:主视图与活动栏各画一份。 */
+function drawDigestBox(box) {
+  box.textContent = ''
+  if (!digest.running && !digest.error && !digest.errorKey) return
+  const card = h('div', 'mf-digest')
+  if (digest.running) {
+    const headRow = h('div', 'mf-prog-head')
+    headRow.appendChild(h('span', null, t('digestProgress', { label: digest.label ? t(digest.label) : '' })))
+    headRow.appendChild(h('span', null, `${Math.round(digest.pct)}%`))
+    const track = h('div', 'mf-prog-track')
+    const fill = h('div', 'mf-prog-fill')
+    fill.style.width = `${Math.min(100, digest.pct)}%`
+    track.appendChild(fill)
+    const row = h('div', 'mf-row')
+    row.appendChild(h('span', 'mf-flex1'))
+    row.appendChild(mkBtn(t('btnCancel'), 'ghost sm', () => { if (digest.controller) digest.controller.abort() }))
+    card.appendChild(headRow); card.appendChild(track); card.appendChild(row)
+  } else {
+    const row = h('div', 'mf-row')
+    row.appendChild(h('span', 'mf-err', t('digestFail', { msg: digestErrText() })))
+    row.appendChild(h('span', 'mf-flex1'))
+    row.appendChild(mkBtn(t('btnRetry'), 'ghost sm', () => { digest.error = ''; digest.errorKey = ''; void runDigest() }))
+    row.appendChild(mkBtn(t('btnGotIt'), 'ghost sm', () => { digest.error = ''; digest.errorKey = ''; dEmit() }))
+    card.appendChild(row)
+  }
+  box.appendChild(card)
+}
+function installStyle(el) {
+  if (styleHandle) return
+  el.appendChild(h('style', null, STYLE))
+}
+const dayLabel = (k) => {
+  const today = todayKey()
+  return k === today ? t('dayToday') : k === shiftDays(today, -1) ? t('dayYesterday') : weekDay(k, today)
+}
+/** 一行闪念的外形:时间左列 + 正文。actions 是悬停才露的那排。 */
+function memoLine(m, onTag, opts) {
+  const row = h('div', 'mf-memo')
+  row.setAttribute('data-memo', '1')
+  row.appendChild(h('span', 'mf-time', opts && opts.justNow ? t('justNow') : timeOfIso(m.ts)))
+  const body = h('div', 'mf-mbody')
+  renderMemoText(body, m.text, onTag)
+  row.appendChild(body)
+  return row
+}
+
+// ══ 闪念盒主视图 ═════════════════════════════════════════════════════════════
+function mountMemos(el, view) {
   el.textContent = ''
-  const styleEl = h('style'); styleEl.textContent = STYLE; el.appendChild(styleEl)
+  mainMounts += 1
+  installStyle(el)
+  const phone = isPhone()
   const rootEl = h('div', 'mf-root'); el.appendChild(rootEl)
-  const wrap = h('div', 'mf-wrap'); rootEl.appendChild(wrap)
-  const offTheme = themeObserver(rootEl)
+  if (phone) rootEl.setAttribute('data-phone', '1')
+  const scroll = h('div', 'mf-scroll'); rootEl.appendChild(scroll)
+  const wrap = h('div', 'mf-wrap'); scroll.appendChild(wrap)
 
-  let store = new Map()
-  let loading = true
-  let loadError = ''
-  let filterTag = '', filterDay = '', searchQ = '', showArch = false
   let editingTs = ''
-  // 编辑框里**还没保存**的草稿。整树重画(切语言 / 总线 added / 过滤)会把编辑框整个换成新元素,
+  // 编辑框里**还没保存**的草稿。行重建(切语言 / 总线 added / 过滤)会把编辑框整个换成新元素,
   // 若那时回读磁盘原文 `m.text`,用户正在补的一大段当场消失 —— 闪念没有回收站,重画不许吃字。
   // 与 editingTs 同生命周期:进编辑/取消/保存都走 endEdit() 一处清零(null = 尚未改动 → 用 m.text)。
   let editDraft = null
   const endEdit = () => { editingTs = ''; editDraft = null }
 
-  // ── 骨架 ──
-  const head = h('div', 'mf-head')
+  // ── 标题行:新宿主用视图头,旧宿主自己画 ──
   const stats = h('span', 'mf-stats', '')
-  const btnDigest = mkBtn('', 'sm', () => { void runDigest() })
-  const btnRebuild = mkBtn('', 'sm', () => { void doRebuild() })
-  const btnArch = mkBtn('', 'sm', () => { showArch = !showArch; btnArch.className = `mf-btn sm${showArch ? ' on' : ''}`; renderList() })
+  const btnDigest = mkBtn('', 'ghost sm', () => { void runDigest() })
+  const digestIcon = mkIcon('sparkles', 15)
+  const digestText = h('span', null, '')
+  if (digestIcon) btnDigest.appendChild(digestIcon)
+  btnDigest.appendChild(digestText)
+  const hasMenu = !!(ctx.ui && ctx.ui.contextMenu && ctx.ui.icon)
+  const btnMore = hasMenu ? iconBtn('more', t('more'), '', () => {
+    const entries = [{ label: t('btnRebuild'), icon: 'refresh', run: () => { void doRebuild() } }]
+    if (phone) entries.unshift({ label: t('btnDigest'), icon: 'sparkles', run: () => { void runDigest() } })
+    ctx.ui.contextMenu({ anchor: btnMore, align: 'end' }, entries)
+  }) : null
+  const btnRebuild = hasMenu ? null : mkBtn('', 'ghost sm', () => { void doRebuild() })
+  // 手机:标签走宿主下拉(安卓上是原生底部抽屉,抓手、搜索和系统返回都归宿主);它也没有就退回芯片
+  const tagPickBox = phone ? h('span', 'mf-pick') : null
+  let tagPick = null
+  const pickOptions = () => {
+    const out = [{ value: '', label: `${t('navAll')} · ${flatAll().filter((it) => !it.m.archived).length}` }]
+    walkTags(tagIndex(), (n) => out.push({ value: n.path, label: `${flatTitle(n.path)} · ${n.count}` }))
+    return out
+  }
+  if (tagPickBox && ctx.ui && ctx.ui.mountControl) {
+    tagPick = ctx.ui.mountControl(tagPickBox, {
+      type: 'select', size: 'toolbar', value: '', label: t('navTags'), options: pickOptions(),
+      onChange: (v) => { if (v) pickTag(v); else clearFilters() },
+    })
+  }
+  const useChips = !sidebarOk() && !tagPick
+  const headActions = [stats, tagPick ? tagPickBox : null, phone ? null : btnDigest, btnMore, btnRebuild].filter(Boolean)
+  const head = ctx.ui && ctx.ui.setViewHead ? ctx.ui.setViewHead(el, { title: pText('appName'), actions: headActions }) : null
   const titleEl = h('span', 'mf-title', '')
-  head.appendChild(titleEl)
-  head.appendChild(stats)
-  head.appendChild(h('span', 'mf-flex1'))
-  head.appendChild(btnDigest); head.appendChild(btnRebuild); head.appendChild(btnArch)
-  wrap.appendChild(head)
-
+  if (!head) {
+    const row = h('div', 'mf-head')
+    row.appendChild(titleEl)
+    row.appendChild(stats)
+    row.appendChild(h('span', 'mf-flex1'))
+    for (const a of headActions) { if (a !== stats) row.appendChild(a) }
+    wrap.appendChild(row)
+  }
   const digestBox = h('div'); wrap.appendChild(digestBox)
 
-  // ── 输入区 ──
-  const inputCard = h('div', 'mf-card')
-  const ta = h('textarea', 'mf-ta')
-  ta.setAttribute('rows', '2')
-  const autoGrow = () => { if (typeof ta.scrollHeight === 'number' && ta.style) { ta.style.height = 'auto'; ta.style.height = Math.min(220, ta.scrollHeight) + 'px' } }
-  ta.addEventListener('input', autoGrow)
-  // 输入法合成态的 Enter(选候选词上屏)不算发送:isComposing / keyCode 229 双闸
-  ta.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.shiftKey) return
-    if (e.isComposing || e.keyCode === 229) return
-    if (e.preventDefault) e.preventDefault()
-    void doSend()
+  // ── 输入区:桌面在时间线上方,手机贴底 ──
+  const dock = h('div', 'mf-dock')
+  const pending = { fly: null }
+  const composer = mountComposer(phone ? dock : wrap, {
+    send: async (text, from) => {
+      pending.fly = { text, from }
+      try { await addMemo(text) } finally { pending.fly = null }
+    },
   })
-  const toolRow = h('div', 'mf-row')
-  const chipsBox = h('div', 'mf-row')
-  const vMsg = h('div', 'mf-vmsg', '')
-  const sendBtn = mkBtn('', 'primary', () => { void doSend() })
-  toolRow.appendChild(chipsBox)
-  toolRow.appendChild(h('span', 'mf-flex1'))
-  let voiceBtn = null
-  let syncVoice = () => {}
-  if (voiceAvailable()) {
-    voiceBtn = mkBtn('', 'mf-voice sm', null)
-    voiceBtn.setAttribute('data-voice', '1')
-    const syncVoiceUI = () => {
-      voiceBtn.setAttribute('title', t('voiceHint'))
-      if (rec.busy) { voiceBtn.textContent = t('btnVoiceBusy'); voiceBtn.disabled = true; return }
-      voiceBtn.disabled = false
-      if (rec.active) { voiceBtn.textContent = t('btnVoiceStop'); voiceBtn.className = 'mf-btn mf-voice sm rec' }
-      else { voiceBtn.textContent = t('btnVoice'); voiceBtn.className = 'mf-btn mf-voice sm' }
-    }
-    syncVoice = syncVoiceUI
-    syncVoiceUI()
-    const onDone = (text) => {
-      vMsg.textContent = ''
-      ta.value = ta.value && ta.value.replace(/\s+$/, '') ? `${ta.value.replace(/\s+$/, '')} ${text}` : text
-      autoGrow()
-      if (ta.focus) ta.focus()
-    }
-    const onErr = (msg) => { vMsg.textContent = msg; say(msg, { level: 'warning' }) }
-    // 两种姿势并存:按住说话(down…≥400ms…up/滑出=结束)/ 点击开始-再点结束。
-    // ptrDown 区分「指针仍按着」:点击模式下光标移出按钮绝不能结束录音(否则点击模式形同虚设)。
-    let ptrDown = false
-    voiceBtn.addEventListener('pointerdown', (e) => {
-      if (e && e.preventDefault) e.preventDefault()
-      if (rec.busy) return
-      ptrDown = true
-      if (rec.active) { stopRec(false); return }
-      vMsg.textContent = ''
-      void startRec(onDone, onErr, syncVoiceUI)
-    })
-    voiceBtn.addEventListener('pointerup', () => { const held = ptrDown; ptrDown = false; if (held && rec.active && Date.now() - rec.t0 >= 400) stopRec(false) })
-    voiceBtn.addEventListener('pointerleave', () => { const held = ptrDown; ptrDown = false; if (held && rec.active && Date.now() - rec.t0 >= 400) stopRec(false) })
-    voiceBtn.addEventListener('pointercancel', () => { const held = ptrDown; ptrDown = false; if (held && rec.active) stopRec(true) })
-    toolRow.appendChild(voiceBtn)
-  }
-  toolRow.appendChild(sendBtn)
-  inputCard.appendChild(ta)
-  inputCard.appendChild(toolRow)
-  inputCard.appendChild(vMsg)
-  wrap.appendChild(inputCard)
+  if (phone) rootEl.appendChild(dock)
 
-  const reviewBox = h('div'); wrap.appendChild(reviewBox)
-
-  // ── 筛选行 + 热力图 ──
-  const filterRow = h('div', 'mf-row')
-  const searchEl = h('input', 'mf-input')
-  searchEl.addEventListener('input', () => { searchQ = String(searchEl.value || ''); renderList() })
-  const activeChips = h('div', 'mf-row')
-  filterRow.appendChild(searchEl)
-  filterRow.appendChild(activeChips)
-  wrap.appendChild(filterRow)
-  const heatBox = h('div'); wrap.appendChild(heatBox)
-  const listBox = h('div'); wrap.appendChild(listBox)
-
-  // ── 数据 ──
-  const flatAll = () => flatten(store)
-  const daysMap = () => {
-    const d = {}
-    for (const it of flatAll()) { const k = dayKeyOfIso(it.m.ts); if (k) d[k] = (d[k] || 0) + 1 }
-    return d
-  }
-  async function reloadMonth(ym) {
-    let memos
-    try { memos = await readMonthRaw(ym) } catch { return } // 瞬时读失败:保留现有画面,绝不当「月已清空」
-    if (memos && memos.length) store.set(ym, memos)
-    else store.delete(ym)
-  }
-  async function loadStore() {
-    loading = true; loadError = ''
-    renderList()
-    try { store = await loadAll() } catch (e) { loadError = (e && e.message) || String(e) }
-    loading = false
-    const failed = store.failedMonths || []
-    if (failed.length) say(t('monthsFailed', { c: nMonthFiles(failed.length), list: joinList(failed) }), { level: 'warning' })
-    renderAll()
-  }
-  // 视图变更走同一条写队列,与并发 addMemo(状态栏 quickCapture / 命令面板)排队互斥。
-  // 变更以「磁盘现状为基 + 按 ts 重放本次修改」落盘(经典 read-modify-write):
-  // 并发新条天然保全,总线 reloadMonth 换掉 store 数组也不会丢这次修改。
-  // 磁盘读不到(抛错或缺席)一律拒改 —— 能被 patch/delete 的条目必然来自一次成功读过的月文件,
-  // 「读不到却要整月重写」没有正当场景;旧版曾回退陈旧 store 整月重写,覆没过外部新写的条(P1 回归)。
-  async function persistMonthOp(ym, apply) {
-    await enqueueWrite(async () => {
-      let disk
-      try { disk = await readMonthRaw(ym) }
-      catch { throw new Error(t('editCanceled', { ym })) }
-      if (disk == null) throw new Error(t('editCanceledGone', { ym }))
-      const arr = disk
-      const before = cacheFromMemos(arr)
-      apply(arr)
-      store.set(ym, arr)
-      await writeMonth(ym, arr)
-      // 缓存走增量补丁,绝不由 store 全量重建 —— store 可能缺读失败的月份,全量重建会把防覆盖证词清零(P0 链条)。
-      try {
-        const c = await readCacheFileRaw()
-        if (c) {
-          applyCacheDelta(c, before, cacheFromMemos(arr))
-          c.builtAt = Date.now()
-          await writeCacheFile(c)
-        }
-      } catch { /* 缓存读失败:跳过本次派生更新,保住证词;缓存的账「重建缓存」随时可校准 */ }
-    })
-  }
-
-  // ── 变更操作 ──
-  async function patchMemo(ym, m, patch) {
-    const prev = {}
-    for (const k of Object.keys(patch)) prev[k] = m[k]
-    try {
-      Object.assign(m, patch) // 立即反映到 UI;落盘时按 ts 在磁盘现状上重放
-      await persistMonthOp(ym, (arr) => {
-        const x = arr.find((y) => y.ts === m.ts)
-        if (x) Object.assign(x, patch)
-      })
-      renderAll()
-    } catch (e) {
-      Object.assign(m, prev) // 拒改回滚:UI 与磁盘保持一致,不留「看着改成了其实没落盘」的假象
-      renderAll()
-      say(t('saveFail', { msg: (e && e.message) || e }), { level: 'error' })
-    }
-  }
-  async function deleteMemo(ym, m) {
-    // y 确认是删除契约的一部分:没有 prompt 的宿主宁可不删,绝不静默单击即毁
-    if (!ctx.app.prompt) { say(t('deleteNoPrompt'), { level: 'warning' }); return }
-    let ok
-    try { ok = await ctx.app.prompt(t('deleteConfirm'), '') } catch { return }
-    if (ok == null || String(ok).trim().toLowerCase() !== 'y') return
-    const prevArr = store.get(ym) || []
-    try {
-      store.set(ym, prevArr.filter((x) => x !== m)) // UI 先行
-      await persistMonthOp(ym, (arr) => {
-        const i = arr.findIndex((y) => y.ts === m.ts)
-        if (i >= 0) arr.splice(i, 1)
-      })
-      say(t('deleted'), { level: 'success' })
-      renderAll()
-    } catch (e) {
-      store.set(ym, prevArr) // 拒改回滚:磁盘没删成,画面也不能装删了
-      renderAll()
-      say(t('deleteFail', { msg: (e && e.message) || e }), { level: 'error' })
-    }
-  }
-  async function toNote(ym, m) {
-    const wasArchived = m.archived
-    try {
-      const p = await memoToNote(m)
-      m.archived = true
-      await persistMonthOp(ym, (arr) => {
-        const x = arr.find((y) => y.ts === m.ts)
-        if (x) x.archived = true
-      })
-      say(t('toNoteOk'), { level: 'success' })
-      if (ctx.app.openFile) ctx.app.openFile(p)
-      renderAll()
-    } catch (e) {
-      m.archived = wasArchived // 归档标没落盘就不装归档了(笔记文件若已写出则保留)
-      renderAll()
-      say(t('toNoteFail', { msg: (e && e.message) || e }), { level: 'error' })
-    }
-  }
-  let sending = false // Enter 通道重入闸:双击 Enter / Enter+按钮同击只落一条
-  async function doSend() {
-    if (sending) return
-    const v = ta.value
-    if (!v || !String(v).trim()) return
-    sending = true
-    sendBtn.disabled = true
-    try {
-      await addMemo(v)
-      ta.value = ''
-      autoGrow()
-      await reloadMonth(monthKeyOf(Date.now()))
-      renderAll()
-    } catch (e) { say(t('saveFail', { msg: (e && e.message) || e }), { level: 'error' }) }
-    finally { sending = false; sendBtn.disabled = false }
-  }
-  async function doRebuild() {
-    try {
-      const cur = firstMonth() || monthKeyOf(Date.now())
-      let ym = cur
-      if (ctx.app.prompt) {
-        const v = await ctx.app.prompt(t('rebuildPrompt'), cur)
-        if (v == null) return
-        ym = String(v).trim() || cur
-      }
-      if (!YM_RE.test(ym)) { say(t('rebuildBadMonth'), { level: 'warning' }); return }
-      if (ym < cur) setFirstMonth(ym)
-      // 用户主动重建 = 声明「以磁盘现状为准」:清掉写前防线的会话记忆,免得删过月文件后被拒写死锁
-      monthKnownCounts.clear()
-      monthPreambles.clear()
-      await loadStore()
-      const c = await rebuildCacheFromStore(store)
-      say(t('rebuildOk', { c: nMemos(c.total) }), { level: 'success' })
-      renderAll()
-    } catch (e) { say(t('rebuildFail', { msg: (e && e.message) || e }), { level: 'error' }) }
-  }
+  const reviewBox = h('div', 'mf-review'); wrap.appendChild(reviewBox)
+  // 旧宿主 / 没有宿主下拉的手机:主区顶部的标签芯片 + 搜索框(新宿主这两样都在左栏)
+  const searchEl = useChips ? h('input', 'mf-input') : null
+  if (searchEl) searchEl.addEventListener('input', () => { setNav({ search: String(searchEl.value || '') }, 'none') })
+  const chipsBox = h('div', 'mf-chips')
+  if (useChips) { wrap.appendChild(searchEl); wrap.appendChild(chipsBox) }
+  const filterBar = h('div', 'mf-flt'); wrap.appendChild(filterBar)
+  const stateBox = h('div'); wrap.appendChild(stateBox)
+  const listBox = h('div', 'mf-list'); wrap.appendChild(listBox)
+  const rows = keyedRows(listBox)
+  let emptyHost = null
 
   // ── 渲染 ──
   function renderStats() {
-    const d = daysMap()
-    let total = 0
-    for (const k of Object.keys(d)) total += d[k]
-    const s = streakOf(d, todayKey())
-    stats.textContent = total ? t('stats', { c: nMemos(total), d: s }) : ''
+    const live = flatAll().map((x) => x.m)
+    const d = {}
+    for (const m of live) { const k = dayKeyOfIso(m.ts); if (k) d[k] = (d[k] || 0) + 1 }
+    stats.textContent = live.length ? t('stats', { c: nMemos(live.length), d: streakOf(d, todayKey()) }) : ''
   }
   /** 静态骨架上的文案(标题 / 按钮 / placeholder):语言一变就地重写,不重挂视图。 */
   function renderChrome() {
     titleEl.textContent = t('appName')
-    btnDigest.textContent = t('btnDigest')
-    btnRebuild.textContent = t('btnRebuild')
-    btnArch.textContent = t('btnShowArch')
-    sendBtn.textContent = t('btnSend')
-    ta.setAttribute('placeholder', t('inputPlaceholder'))
-    searchEl.setAttribute('placeholder', t('searchPlaceholder'))
-    syncVoice() // 录音中也安全:它按 rec 状态重算,不会把「结束录音」写回「语音」
+    digestText.textContent = t('btnDigest')
+    if (btnRebuild) btnRebuild.textContent = t('btnRebuild')
+    if (btnMore) relabel(btnMore, t('more'))
+    if (searchEl) searchEl.setAttribute('placeholder', t('searchPlaceholder'))
+    composer.relabel()
   }
   function renderChips() {
+    if (tagPick) tagPick.update({ value: nav.tags.length === 1 ? nav.tags[0] : '', options: pickOptions(), label: t('navTags') })
+    if (!useChips) return
     chipsBox.textContent = ''
-    for (const t of recentTags().slice(0, 8)) {
-      const c = h('button', 'mf-chip', `#${t}`)
-      c.addEventListener('click', () => {
-        const cur = ta.value || ''
-        ta.value = cur && !/\s$/.test(cur) ? `${cur} #${t} ` : `${cur}#${t} `
-        if (ta.focus) ta.focus()
-      })
+    const chip = (label, on, fn) => {
+      const c = h('button', `mf-chip${on ? ' on' : ''}`, label)
+      c.setAttribute('type', 'button')
+      c.addEventListener('click', fn)
       chipsBox.appendChild(c)
     }
+    chip(t('navAll'), nav.view === 'all' && !nav.tags.length, () => { setNav({ view: 'all', tags: [], day: '', search: nav.search }) })
+    chip(t('navArchived'), nav.view === 'archived', () => { setNav({ view: nav.view === 'archived' ? 'all' : 'archived' }) })
+    walkTags(tagIndex(), (n) => chip(flatTitle(n.path), nav.tags.length === 1 && nav.tags[0].toLowerCase() === n.lower, () => { pickTag(n.path) }))
   }
-  function renderDigestBox() {
-    digestBox.textContent = ''
-    if (!digest.running && !digest.error && !digest.errorKey) return
-    const card = h('div', 'mf-card')
-    if (digest.running) {
-      const headRow = h('div', 'mf-prog-head')
-      headRow.appendChild(h('span', null, t('digestProgress', { label: digest.label ? t(digest.label) : '' })))
-      headRow.appendChild(h('span', null, `${Math.round(digest.pct)}%`))
-      const track = h('div', 'mf-prog-track')
-      const fill = h('div', 'mf-prog-fill')
-      fill.style.width = `${Math.min(100, digest.pct)}%`
-      track.appendChild(fill)
-      const row = h('div', 'mf-row')
-      row.appendChild(h('span', 'mf-flex1'))
-      row.appendChild(mkBtn(t('btnCancel'), 'sm', () => { if (digest.controller) digest.controller.abort() }))
-      card.appendChild(headRow); card.appendChild(track); card.appendChild(row)
-    } else {
-      const row = h('div', 'mf-row')
-      row.appendChild(h('span', 'mf-err', t('digestFail', { msg: digestErrText() })))
-      row.appendChild(h('span', 'mf-flex1'))
-      row.appendChild(mkBtn(t('btnRetry'), 'sm', () => { digest.error = ''; digest.errorKey = ''; void runDigest() }))
-      row.appendChild(mkBtn(t('btnGotIt'), 'sm', () => { digest.error = ''; digest.errorKey = ''; renderDigestBox() }))
-      card.appendChild(row)
+  function renderFilterBar() {
+    filterBar.textContent = ''
+    const active = nav.tags.length || nav.day
+    filterBar.classList.toggle('on', !!active)
+    if (!active) return
+    const add = (label, clear) => {
+      const c = h('button', 'mf-chip', label)
+      c.setAttribute('type', 'button')
+      c.setAttribute('aria-label', t('filterRemove', { name: label }))
+      const x = mkIcon('x', 12)
+      if (x) c.appendChild(x)
+      else c.appendChild(document.createTextNode(' ✕'))
+      c.addEventListener('click', clear)
+      filterBar.appendChild(c)
     }
-    digestBox.appendChild(card)
+    for (const tg of nav.tags) add(`#${tg}`, () => { setNav({ tags: nav.tags.filter((x) => x !== tg) }) }) // 标签名是用户数据,不翻
+    if (nav.day) add(fmtDay(nav.day), () => { setNav({ day: '' }) })
+    const shown = visibleItems().length
+    const n = nav.tags.length === 1 && tagIndex().nodes.get(nav.tags[0].toLowerCase())
+    const subs = n ? n.children.length : 0
+    filterBar.appendChild(h('span', null, subs ? t('filterCountSub', { c: nMemos(shown), s: nSubTags(subs) }) : t('filterCount', { c: nMemos(shown) })))
+    filterBar.appendChild(h('span', 'mf-flex1'))
+    filterBar.appendChild(mkBtn(t('filterClear'), 'ghost sm', () => { clearFilters() }))
   }
-  function currentPicks() {
-    const today = todayKey() // 不叫 t:与词表 helper t() 重名
-    if (reviewState.day !== today) { reviewState.day = today; reviewState.done = new Set(); reviewState.picks = null }
-    const n = reviewCountSetting()
-    if (!n) return []
-    const all = flatAll().map((x) => x.m)
-    if (!reviewState.picks) {
-      if (loading) return [] // 数据没到位不冻结,免得把空集钉成「今天没得回顾」
-      reviewState.picks = pickReview(reviewEligible(all, today), seedOfDay(today), n).map((m) => m.ts)
-    }
-    // 冻结后只做过滤,不重抽:已删除的卡掉队;在时间线上被归档(而非经回顾处理)的也掉队;
-    // 经回顾动作归档/转笔记的(已进 done)留在分母里,完成判定与「还剩 N/M」才不会自我延长。
-    const byTs = new Map()
-    for (const m of all) byTs.set(m.ts, m)
-    return reviewState.picks.map((ts) => byTs.get(ts)).filter((m) => m && (!m.archived || reviewState.done.has(m.ts)))
-  }
+  // 牌堆:一次一张,后面两张垫着;0 张整块收起(动效 3)
+  let deckBusy = false
   function renderReview() {
     reviewBox.textContent = ''
-    const today = todayKey() // 不叫 t:与词表 helper t() 重名
+    const today = todayKey()
+    if (nav.tags.length || nav.day || nav.search.trim() || nav.view === 'archived') return
     if (getLS('reviewDone', '') === today) return
     const picks = currentPicks()
-    if (!picks.length) return
     const remain = picks.filter((p) => !reviewState.done.has(p.ts))
     if (!remain.length) return
-    const card = h('div', 'mf-card')
-    const headRow = h('div', 'mf-row')
-    headRow.appendChild(h('span', 'mf-label', t('reviewLabel')))
-    headRow.appendChild(h('span', 'mf-hint', t('reviewHint', { left: remain.length, total: picks.length })))
-    card.appendChild(headRow)
-    const rowBox = h('div', 'mf-rcards')
-    for (const p of remain) {
-      const rc = h('div', 'mf-rcard')
+    const deck = h('div', 'mf-deck')
+    const stack = remain.slice(0, 3)
+    const cards = []
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const p = stack[i]
+      const rc = h('div', `mf-rc${i ? ' under' : ''}`)
       rc.setAttribute('data-review', '1')
-      rc.appendChild(h('div', 'mf-rdate', fmtDay(dayKeyOfIso(p.ts))))
+      if (i) {
+        rc.setAttribute('aria-hidden', 'true')
+        rc.style.transform = `translateY(${i * 6}px) scale(${1 - i * 0.03})`
+        rc.style.opacity = String(0.7 - i * 0.2)
+      }
+      rc.appendChild(h('small', 'mf-rdate', t('reviewHead', { date: shortDay(dayKeyOfIso(p.ts)), left: remain.length })))
       const tx = h('div', 'mf-rtext')
       renderMemoText(tx, p.text, null)
       rc.appendChild(tx)
-      const acts = h('div', 'mf-row')
-      const done = (fn) => async () => {
-        reviewState.done.add(p.ts)
-        if (fn) await fn()
-        // 处理动作可能让条目失去回顾资格(归档/转笔记)——picksNow 变空同样算「全部处理完」
-        const picksNow = currentPicks()
-        if (!picksNow.length || picksNow.every((x) => reviewState.done.has(x.ts))) {
-          setLS('reviewDone', today)
-          ctx.activity?.log('review_done')
-          say(t('reviewDone'), { level: 'success' })
-        }
-        renderAll()
+      if (!i) {
+        const acts = h('div', 'mf-racts')
+        const act = (label, fn) => acts.appendChild(mkBtn(label, 'ghost sm', () => { void handle(p, fn, rc, cards) }))
+        act(t('actSkip'), null)
+        act(t('actToNote'), () => toNote(p.ts))
+        act(t('actArchive'), () => patchMemo(p.ts, { archived: true }))
+        rc.appendChild(acts)
       }
-      const home = homeOf(p)
-      acts.appendChild(mkBtn(t('actSkip'), 'sm', done(null)))
-      acts.appendChild(mkBtn(t('actToNote'), 'sm', done(() => (home ? toNote(home, p) : null))))
-      acts.appendChild(mkBtn(t('actArchive'), 'sm', done(() => (home ? patchMemo(home, p, { archived: true }) : null))))
-      rc.appendChild(acts)
-      rowBox.appendChild(rc)
+      cards.unshift(rc)
+      deck.appendChild(rc)
     }
-    card.appendChild(rowBox)
-    reviewBox.appendChild(card)
+    reviewBox.appendChild(deck)
   }
-  function homeOf(memo) {
-    for (const it of flatAll()) { if (it.m === memo) return it.ym }
-    return ''
-  }
-  function renderFilter() {
-    activeChips.textContent = ''
-    const add = (label, clear) => {
-      const c = h('button', 'mf-chip x', `${label} ✕`)
-      c.addEventListener('click', clear)
-      activeChips.appendChild(c)
+  async function handle(p, fn, top, cards) {
+    if (deckBusy) return
+    deckBusy = true
+    reviewState.done.add(p.ts)
+    const moves = cards.slice(1).map((c, idx) => {
+      const d = idx + 1
+      return anim(c, [
+        { transform: `translateY(${d * 6}px) scale(${1 - d * 0.03})`, opacity: 0.7 - d * 0.2 },
+        { transform: `translateY(${(d - 1) * 6}px) scale(${1 - (d - 1) * 0.03})`, opacity: d === 1 ? 1 : 0.5 },
+      ], 250)
+    })
+    moves.push(anim(top, [{ transform: 'none', opacity: 1 }, { transform: 'translateX(28px)', opacity: 0 }], 180, EASE.calm))
+    const last = cards.length === 1
+    if (last) { top.style.opacity = '0'; moves.push(animHeight(reviewBox, heightOf(reviewBox), 0, 200)) }
+    await Promise.all(moves)
+    if (fn) await fn()
+    deckBusy = false
+    // 处理动作可能让条目失去回顾资格(归档/转笔记)——picksNow 变空同样算「全部处理完」
+    const picksNow = currentPicks()
+    if (!picksNow.length || picksNow.every((x) => reviewState.done.has(x.ts))) {
+      setLS('reviewDone', todayKey())
+      ctx.activity?.log('review_done')
+      say(t('reviewDone'), { level: 'success' })
     }
-    if (filterTag) add(`#${filterTag}`, () => { filterTag = ''; renderAll() }) // 标签名是用户数据,不翻
-    if (filterDay) add(fmtDay(filterDay), () => { filterDay = ''; renderAll() })
+    notifyList()
+    renderAll('none')
   }
-  function renderHeat() {
+  function visibleItems() {
+    let items = flatAll().filter((it) => (nav.view === 'archived' ? it.m.archived : !it.m.archived))
+    if (nav.tags.length) items = items.filter((it) => memoHasTags(it.m, nav.tags))
+    if (nav.day) items = items.filter((it) => dayKeyOfIso(it.m.ts) === nav.day)
+    if (nav.search.trim()) { const q = nav.search.trim().toLowerCase(); items = items.filter((it) => it.m.text.toLowerCase().includes(q)) }
+    return items.sort((a, b) => (a.m.ts < b.m.ts ? 1 : a.m.ts > b.m.ts ? -1 : 0))
+  }
+  function rowActions(m) {
+    const ts = m.ts
+    const list = [
+      ['pencil', t('actEdit'), () => { endEdit(); editingTs = ts; renderList('none') }], // 换一条编辑 → 上一条的草稿作废
+      ['pin', m.pinned ? t('actUnpin') : t('actPin'), () => { void patchMemo(ts, { pinned: !m.pinned }) }],
+      [m.archived ? 'unarchive' : 'archive', m.archived ? t('actRestore') : t('actArchive'), () => { void patchMemo(ts, { archived: !m.archived }) }],
+      ['file-text', t('actToNote'), () => { void toNote(ts) }],
+      ['trash-2', t('actDelete'), () => { void deleteMemo(ts) }, true],
+    ]
+    const acts = h('span', 'mf-acts')
+    if (phone && ctx.ui && ctx.ui.contextMenu) {
+      acts.classList.add('phone')
+      const more = iconBtn('more', t('more'), 'mf-abtn', () => {
+        ctx.ui.contextMenu({ anchor: more, align: 'end' }, list.map(([icon, label, run, danger]) => ({ icon, label, run, danger: !!danger })))
+      })
+      acts.appendChild(more)
+      return acts
+    }
+    for (const [icon, label, run, danger] of list) acts.appendChild(iconBtn(icon, label, `mf-abtn${danger ? ' danger' : ''}`, run))
+    return acts
+  }
+  function memoRow(m, justNow) {
+    const row = memoLine(m, (tag) => { addTag(tag) }, { justNow })
+    row.appendChild(rowActions(m))
+    if (editingTs === m.ts) {
+      row.textContent = ''
+      row.classList.add('editing')
+      const ed = h('textarea', 'mf-ta mf-edit')
+      ed.value = editDraft != null ? editDraft : m.text // 有草稿用草稿(空串也算草稿:用户可能刚全选删掉)
+      ed.addEventListener('input', () => { editDraft = String(ed.value == null ? '' : ed.value) })
+      const r2 = h('div', 'mf-row')
+      r2.appendChild(h('span', 'mf-flex1'))
+      r2.appendChild(mkBtn(t('btnCancel'), 'ghost sm', () => { endEdit(); renderList('none') }))
+      r2.appendChild(mkBtn(t('btnSave'), 'primary sm', () => {
+        const nv = String(ed.value == null ? '' : ed.value).replace(/\s+$/, '')
+        const changed = nv.trim() && nv !== m.text
+        const ts = m.ts
+        endEdit()
+        if (changed) { void patchMemo(ts, { text: nv }) } else renderList('none')
+      }))
+      row.appendChild(ed)
+      row.appendChild(r2)
+    }
+    return row
+  }
+  function timeline() {
+    const items = visibleItems()
+    const out = []
+    const memoEntry = (it, prefix) => {
+      const m = it.m
+      const fresh = justAdded === m.ts
+      const sig = `${L()}|${m.text}|${m.pinned}|${m.archived}|${editingTs === m.ts}|${fresh}`
+      out.push({ key: `${prefix}${m.ts}`, sig, build: () => memoRow(m, fresh) })
+    }
+    const pinned = nav.view === 'archived' ? [] : items.filter((it) => it.m.pinned)
+    if (pinned.length) {
+      const label = t('pinnedGroup', { n: pinned.length })
+      out.push({ key: 'head:pinned', sig: label, build: () => h('div', 'mf-day', label) })
+      for (const it of pinned) memoEntry(it, 'memo:')
+    }
+    let curDay = ''
+    for (const it of items) {
+      if (it.m.pinned && nav.view !== 'archived') continue
+      const k = dayKeyOfIso(it.m.ts)
+      if (k !== curDay) {
+        curDay = k
+        const label = dayLabel(k)
+        out.push({ key: `head:${k}`, sig: label, build: () => h('div', 'mf-day', label) })
+      }
+      memoEntry(it, 'memo:')
+    }
+    return out
+  }
+  function emptyState(title, line) {
+    if (ctx.ui && ctx.ui.mountEmptyState) {
+      emptyHost = ctx.ui.mountEmptyState(stateBox, { icon: 'zap', title, line })
+      return
+    }
+    const e = h('div', 'mf-empty')
+    e.appendChild(h('b', null, title))
+    if (line) e.appendChild(h('div', null, line))
+    stateBox.appendChild(e)
+  }
+  function renderList(mode, onAdded) {
+    if (emptyHost) { emptyHost.dispose(); emptyHost = null }
+    stateBox.textContent = ''
+    const clearAnd = (fn) => { rows.clear(); fn() }
+    if (db.loading) { clearAnd(() => stateBox.appendChild(h('div', 'mf-empty', t('loading')))); return }
+    if (db.error) {
+      clearAnd(() => {
+        const e = h('div', 'mf-empty')
+        e.appendChild(h('b', null, t('loadFail')))
+        e.appendChild(h('div', 'mf-err', db.error))
+        e.appendChild(mkBtn(t('btnRetry'), 'sm', () => { void loadStore() }))
+        stateBox.appendChild(e)
+      })
+      return
+    }
+    if (!flatAll().length) { clearAnd(() => emptyState(t('emptyTitle'), t('emptyHint'))); return }
+    if (nav.view === 'review') {
+      rows.clear()
+      if (!reviewLeft()) emptyState(t('reviewDone'), '')
+      return
+    }
+    const entries = timeline()
+    if (!entries.length) { clearAnd(() => stateBox.appendChild(h('div', 'mf-empty', t('noMatch')))); return }
+    rows.sync(entries, mode || 'none', onAdded)
+  }
+  function renderAll(mode, onAdded) {
+    renderChrome(); renderStats(); renderChips(); renderReview(); renderFilterBar(); renderList(mode, onAdded)
+  }
+  // 语言切换:宿主只广播变化,初值自己 getLocale()。**不重挂视图**——就地重画,
+  // 输入框里没发出去的草稿、编辑框里没保存的字、正在录的音、跑着的周整理都不能被语言切换打断。
+  const offLocale = ctx.subscribeLocale?.(() => { renderAll('none'); drawDigestBox(digestBox) })
+  renderChrome()
+  drawDigestBox(digestBox)
+
+  // Mini 的「在主面板显示」带着标签筛选过来
+  const applyParams = () => {
+    const tg = view && view.getParams ? (view.getParams() || {}).tag : ''
+    if (typeof tg === 'string' && tg && !(nav.tags.length === 1 && nav.tags[0] === tg)) pickTag(tg)
+  }
+  const offParams = view && view.onParamsChanged ? view.onParamsChanged(applyParams) : null
+
+  // ── 总线 + 启动 ──
+  let justAdded = ''
+  const offBus = bus.on((e) => {
+    if (!e) return
+    if (e.type === 'digest') { drawDigestBox(digestBox); return }
+    if (e.type !== 'added') justAdded = ''
+    if (e.type === 'store' || e.type === 'changed') { renderAll('none'); return }
+    if (e.type === 'nav') {
+      // 筛选清掉了:主面板定位目标也清掉,免得重开视图又被 Mini 带来的旧标签筛上
+      const carried = view && view.getParams ? (view.getParams() || {}).tag : ''
+      if (carried && !nav.tags.includes(carried) && view.setParams) view.setParams({ tag: '' })
+      renderAll(e.mode)
+      return
+    }
+    if (e.type === 'added') {
+      justAdded = e.ts
+      const fly = pending.fly
+      renderAll('add', (key, wrapEl) => {
+        if (fly && key === `memo:${e.ts}`) flyTo(rootEl, fly.text, fly.from, wrapEl.firstChild && wrapEl.firstChild.children[1])
+      })
+    }
+  })
+  startSync()
+  applyParams()
+  renderAll('none')
+  ensureStore(true)
+
+  return () => {
+    mainMounts -= 1
+    offBus(); stopSync()
+    if (offLocale) offLocale()
+    if (offParams) offParams()
+    if (emptyHost) emptyHost.dispose()
+    if (tagPick) tagPick.dispose()
+    if (head) head.dispose()
+    composer.dispose()
+  }
+}
+
+// ══ 活动栏(右栏):近 12 周、统计、周整理入口 ════════════════════════════════
+function mountActivity(el) {
+  el.textContent = ''
+  installStyle(el)
+  const rootEl = h('div', 'mf-side'); el.appendChild(rootEl)
+  const heatCap = h('div', 'mf-cap', ''); rootEl.appendChild(heatCap)
+  const heatBox = h('div'); rootEl.appendChild(heatBox)
+  const statBox = h('div', 'mf-stat'); rootEl.appendChild(statBox)
+  const digestBox = h('div'); rootEl.appendChild(digestBox)
+  const weekCard = h('div', 'mf-weekcard'); rootEl.appendChild(weekCard)
+  function daysMap() {
+    const d = {}
+    for (const it of flatAll()) { const k = dayKeyOfIso(it.m.ts); if (k) d[k] = (d[k] || 0) + 1 }
+    return d
+  }
+  function renderHeat(days) {
     heatBox.textContent = ''
-    const days = daysMap()
     const grid = h('div', 'mf-heat')
     const tSer = daySerial(todayKey())
     const start = tSer - ((tSer + 3) % 7) - 77 // 12 周网格,列=周(周一开头)
@@ -1517,131 +2438,136 @@ function mountMemos(el) {
       const key = serialToKey(serial)
       const n = days[key] || 0
       const lv = n <= 0 ? 0 : n === 1 ? 1 : n <= 3 ? 2 : n <= 6 ? 3 : 4
-      const cell = h('span', `mf-cell lv${lv}${filterDay === key ? ' sel' : ''}`)
+      const cell = h('span', `mf-cell lv${lv}${nav.day === key ? ' sel' : ''}`)
       cell.setAttribute('title', t('heatCell', { day: key, c: nMemos(n) })) // day 用 ISO 原键:两语言通读,且是数据键
       if (serial > tSer) cell.className = 'mf-cell future'
-      else cell.addEventListener('click', () => { filterDay = filterDay === key ? '' : key; renderAll() })
+      else cell.addEventListener('click', () => { setNav({ view: 'all', day: nav.day === key ? '' : key }) })
       grid.appendChild(cell)
     }
     heatBox.appendChild(grid)
   }
-  function memoRow(ym, m) {
-    const row = h('div', `mf-memo${m.archived ? ' arch' : ''}`)
-    row.setAttribute('data-memo', '1')
-    const top = h('div', 'mf-mtop')
-    top.appendChild(h('span', null, timeOfIso(m.ts)))
-    if (m.pinned) top.appendChild(h('span', 'mf-flag', t('flagPinned')))
-    if (m.archived) top.appendChild(h('span', 'mf-flag', t('flagArchived')))
-    const acts = h('span', 'mf-acts')
-    const ab = (label, fn, danger) => {
-      const b = h('button', `mf-abtn${danger ? ' danger' : ''}`, label)
-      b.addEventListener('click', fn)
-      acts.appendChild(b)
-    }
-    ab(t('actEdit'), () => { endEdit(); editingTs = m.ts; renderList() }) // 换一条编辑 → 上一条的草稿作废
-    ab(m.pinned ? t('actUnpin') : t('actPin'), () => { void patchMemo(ym, m, { pinned: !m.pinned }) })
-    ab(m.archived ? t('actRestore') : t('actArchive'), () => { void patchMemo(ym, m, { archived: !m.archived }) })
-    ab(t('actToNote'), () => { void toNote(ym, m) })
-    ab(t('actDelete'), () => { void deleteMemo(ym, m) }, true)
-    top.appendChild(acts)
-    row.appendChild(top)
-    if (editingTs === m.ts) {
-      const ed = h('textarea', 'mf-ta')
-      ed.value = editDraft != null ? editDraft : m.text // 有草稿用草稿(空串也算草稿:用户可能刚全选删掉)
-      ed.addEventListener('input', () => { editDraft = String(ed.value == null ? '' : ed.value) })
-      const r2 = h('div', 'mf-row')
-      r2.appendChild(h('span', 'mf-flex1'))
-      r2.appendChild(mkBtn(t('btnCancel'), 'sm', () => { endEdit(); renderList() }))
-      r2.appendChild(mkBtn(t('btnSave'), 'primary sm', () => {
-        const nv = String(ed.value == null ? '' : ed.value).replace(/\s+$/, '')
-        endEdit()
-        if (nv.trim() && nv !== m.text) { void patchMemo(ym, m, { text: nv }) } else renderList()
-      }))
-      row.appendChild(ed)
-      row.appendChild(r2)
-    } else {
-      const body = h('div', 'mf-mbody')
-      renderMemoText(body, m.text, (tag) => { filterTag = filterTag === tag ? '' : tag; renderAll() })
-      row.appendChild(body)
-    }
-    return row
-  }
-  function renderList() {
-    listBox.textContent = ''
-    if (loading) { listBox.appendChild(h('div', 'mf-empty', t('loading'))); return }
-    if (loadError) {
-      const e = h('div', 'mf-empty')
-      e.appendChild(h('b', null, t('loadFail')))
-      e.appendChild(h('div', 'mf-err', loadError))
-      e.appendChild(mkBtn(t('btnRetry'), 'sm', () => { void loadStore() }))
-      listBox.appendChild(e)
-      return
-    }
-    const flat = flatAll()
-    if (!flat.length) {
-      const e = h('div', 'mf-empty')
-      e.appendChild(h('b', null, t('emptyTitle')))
-      e.appendChild(h('div', null, t('emptyHint')))
-      listBox.appendChild(e)
-      return
-    }
-    let items = flat.filter((it) => (showArch ? true : !it.m.archived))
-    if (filterTag) items = items.filter((it) => extractTags(it.m.text).includes(filterTag))
-    if (filterDay) items = items.filter((it) => dayKeyOfIso(it.m.ts) === filterDay)
-    if (searchQ.trim()) { const q = searchQ.trim().toLowerCase(); items = items.filter((it) => it.m.text.toLowerCase().includes(q)) }
-    items.sort((a, b) => (a.m.ts < b.m.ts ? 1 : a.m.ts > b.m.ts ? -1 : 0))
-    if (!items.length) {
-      const e = h('div', 'mf-empty', t('noMatch'))
-      listBox.appendChild(e)
-      return
-    }
-    const pinned = items.filter((it) => it.m.pinned && !it.m.archived)
-    if (pinned.length) {
-      listBox.appendChild(h('div', 'mf-day', t('pinnedGroup', { n: pinned.length })))
-      for (const it of pinned) listBox.appendChild(memoRow(it.ym, it.m))
-    }
-    const tKey = todayKey(), yKey = shiftDays(tKey, -1)
-    let curDay = ''
-    for (const it of items) {
-      if (it.m.pinned && !it.m.archived) continue
-      const k = dayKeyOfIso(it.m.ts)
-      if (k !== curDay) {
-        curDay = k
-        const label = k === tKey ? t('dayToday') : k === yKey ? t('dayYesterday') : fmtDay(k)
-        listBox.appendChild(h('div', 'mf-day', label))
-      }
-      listBox.appendChild(memoRow(it.ym, it.m))
-    }
-  }
   function renderAll() {
-    renderChrome(); renderStats(); renderChips(); renderDigestBox(); renderReview(); renderFilter(); renderHeat(); renderList()
+    const days = daysMap()
+    const all = flatAll()
+    heatCap.textContent = t('heatTitle')
+    renderHeat(days)
+    statBox.textContent = ''
+    const stat = (n, label) => { const s = h('span'); s.appendChild(h('b', null, String(n))); s.appendChild(document.createTextNode(label)); statBox.appendChild(s) }
+    stat(all.length, t('statMemos')); stat(streakOf(days, todayKey()), t('statStreak')); stat(tagIndex().roots.length, t('statGroups'))
+    const week = isoWeekOf(todayKey())
+    const inWeek = all.filter((it) => isoWeekOf(dayKeyOfIso(it.m.ts)) === week).length
+    weekCard.textContent = ''
+    weekCard.appendChild(h('small', null, t('weekCount', { c: nMemos(inWeek) })))
+    weekCard.appendChild(h('div', null, t('weekLine')))
+    const go = h('div', 'mf-weekgo')
+    go.appendChild(mkBtn(t('btnStartDigest'), 'sm', () => { void runDigest() }))
+    weekCard.appendChild(go)
+    drawDigestBox(digestBox)
   }
-  // 语言切换:宿主只广播变化,初值自己 getLocale()。**不重挂视图**——就地重画整屏,
-  // 输入框里没发出去的草稿、编辑框里没保存的字、正在录的音、跑着的周整理都不能被语言切换打断。
-  // 前两样各有各的机制:输入框 ta / 搜索框是 mount 时建的常驻元素(重画只改 placeholder);
-  // 编辑框每次 renderList 都新建,靠 editDraft 回填 —— 少了它,切个语言就把用户正写的一段吃掉。
-  const offLocale = ctx.subscribeLocale?.(() => { renderAll() })
-  renderChrome()
-
-  // ── 总线 + 启动 ──
   const offBus = bus.on((e) => {
     if (!e) return
-    if (e.type === 'digest') { renderDigestBox(); return }
-    if (e.type === 'added') { void reloadMonth(e.ym).then(renderAll) }
+    if (e.type === 'digest') { drawDigestBox(digestBox); return }
+    renderAll()
   })
-  // 眼见为实:首开就把缓存文件落进工作文件夹(文件树里可见,重建按钮也有对象)。
-  // 只在「读成功且文件确实缺席」时播种空缓存;读失败(抛错)一律不写 —— 缓存是写前防线的
-  // 第二道证词,瞬时读失败时把它覆写成空,等于亲手拆掉防线(P0 链条,check 有回归)。
-  // 内容损坏但在场的文件也不动(「重建缓存」按钮可校准),这里绝不抢救。
-  async function ensureCacheFile() {
-    try {
-      const t = await ctx.app.readFile(cachePath())
-      if (t == null || t === '') await writeCacheFile({ days: {}, tags: {}, total: 0, builtAt: Date.now() })
-    } catch { /* 读失败 ≠ 缺席:什么都不写 */ }
-  }
-  void ensureCacheFile().then(loadStore)
+  const offLocale = ctx.subscribeLocale?.(() => { renderAll() })
+  startSync()
+  renderAll()
+  ensureStore(true)
+  return () => { offBus(); stopSync(); if (offLocale) offLocale() }
+}
 
-  return () => { offTheme(); offBus(); if (offLocale) offLocale(); if (rec.active || rec.busy) stopRecHard() }
+// ══ Mini:记 + 今天(M2) ══════════════════════════════════════════════════════
+// 断点跟容器走,不写死 320×420:高度 < 240 只留输入框,宽度 ≥ 480 显示全部标签和日期分组。
+const MINI_TINY_H = 240, MINI_WIDE_W = 480
+function mountQuick(el, view) {
+  el.textContent = ''
+  installStyle(el)
+  const rootEl = h('div', 'mf-q'); el.appendChild(rootEl)
+  const pending = { active: false }
+  const composer = mountComposer(rootEl, {
+    compact: true,
+    send: async (text) => {
+      pending.active = true
+      try { await addMemo(text) } finally { pending.active = false }
+    },
+  })
+  const rest = h('div', 'mf-q-rest'); rootEl.appendChild(rest)
+  const chipsBox = h('div', 'mf-qchips'); rest.appendChild(chipsBox)
+  const listBox = h('div', 'mf-list'); rest.appendChild(listBox)
+  const rows = keyedRows(listBox)
+  const initial = view && view.getParams ? (view.getParams() || {}).tag : ''
+  let sel = typeof initial === 'string' ? initial : ''
+  let wide = false
+  let justAdded = ''
+  const pick = (tag) => {
+    sel = sel && tag && sel.toLowerCase() === tag.toLowerCase() ? '' : tag
+    if (view && view.setParams) view.setParams({ tag: sel })
+    render('none')
+  }
+  function entries() {
+    const today = todayKey()
+    let items = flatAll().filter((it) => !it.m.archived)
+    if (sel) items = items.filter((it) => memoHasTags(it.m, [sel]))
+    else if (!wide) items = items.filter((it) => dayKeyOfIso(it.m.ts) === today)
+    items.sort((a, b) => (a.m.ts < b.m.ts ? 1 : -1))
+    items = items.slice(0, 100)
+    const out = []
+    let cur = ''
+    for (const it of items) {
+      const k = dayKeyOfIso(it.m.ts)
+      if ((wide || sel) && k !== cur) {
+        cur = k
+        const label = dayLabel(k)
+        out.push({ key: `head:${k}`, sig: label, build: () => h('div', 'mf-day', label) })
+      }
+      const m = it.m
+      const fresh = justAdded === m.ts
+      out.push({ key: `memo:${m.ts}`, sig: `${L()}|${m.text}|${fresh}`, build: () => memoLine(m, (tag) => { pick(tag) }, { justNow: fresh }) })
+    }
+    return out
+  }
+  function renderChips() {
+    chipsBox.textContent = ''
+    const chip = (label, on, fn) => {
+      const c = h('button', `mf-chip${on ? ' on' : ''}`, label)
+      c.setAttribute('type', 'button')
+      c.addEventListener('click', fn)
+      chipsBox.appendChild(c)
+    }
+    chip(t(wide ? 'miniAll' : 'miniToday'), !sel, () => { pick('') })
+    const idx = tagIndex()
+    const list = wide ? idx.roots : idx.roots.slice(0, 4)
+    for (const n of list) chip(n.path, !!sel && sel.toLowerCase() === n.lower, () => { pick(n.path) })
+  }
+  function render(mode) {
+    renderChips()
+    if (db.loading) return
+    const list = entries()
+    if (!list.length) { rows.clear(); return }
+    rows.sync(list, mode)
+  }
+  const measure = (w, ht) => {
+    rootEl.setAttribute('data-tiny', ht > 0 && ht < MINI_TINY_H ? '1' : '0')
+    const nextWide = w >= MINI_WIDE_W
+    rootEl.setAttribute('data-wide', nextWide ? '1' : '0')
+    if (nextWide !== wide) { wide = nextWide; render('none') }
+  }
+  const ro = typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver((recs) => { const r = recs[recs.length - 1]; if (r && r.contentRect) measure(r.contentRect.width, r.contentRect.height) })
+    : null
+  if (ro) ro.observe(el) // 量挂载点:rootEl 有内边距,contentRect 会少算
+  const offBus = bus.on((e) => {
+    if (!e || e.type === 'digest' || e.type === 'nav') return
+    if (e.type === 'added') { justAdded = e.ts; render('mini'); return }
+    justAdded = ''
+    render('none')
+  })
+  const offLocale = ctx.subscribeLocale?.(() => { composer.relabel(); render('none') })
+  composer.relabel()
+  startSync()
+  render('none')
+  ensureStore(true)
+  return () => { offBus(); stopSync(); if (ro) ro.disconnect(); if (offLocale) offLocale(); composer.dispose() }
 }
 
 // ── 注册(id 全按 SPEC 钉死;07-18 后 API 一律可选链) ─────────────────────────
@@ -1649,7 +2575,21 @@ function mountMemos(el) {
 // 语言切换后命令面板 / 设置页 / 视图 tab 标题要等重启才跟上(宿主侧已知缺口,见 README)。
 // 绝不为它做「语言变了就 teardown 重注册」——那会打断录音、写队列与已打开的视图。
 // keywords 反而恒双语:搜索面不该因为界面语言而搜不到。
-ctx.registerView?.({ id: 'memos', title: t('appName'), mount: mountMemos, singleton: true })
+styleHandle = ctx.addStyle ? ctx.addStyle(STYLE) : null
+ctx.registerView?.({ id: 'memos', title: pText('appName'), mount: mountMemos, singleton: true })
+ctx.registerView?.({ id: 'activity', title: pText('viewActivity'), icon: 'activity', mount: mountActivity, singleton: true })
+ctx.registerView?.({ id: 'quick', title: pText('appName'), mount: mountQuick })
+ctx.registerListSource?.({
+  id: 'memos',
+  title: pText('appName'),
+  search: true,
+  empty: { icon: 'zap', title: pText('emptyTitle'), line: pText('emptyHint') },
+  items: listRows,
+  subscribe(cb) { listSubs.add(cb); startSync(); ensureStore(); return () => { listSubs.delete(cb); stopSync() } },
+  activeKey: listActiveKey,
+  open: openRow,
+  itemMenu: rowMenu,
+})
 ctx.registerCommand({
   id: 'memoflow-open', title: t('cmdOpen'), keywords: 'memoflow 闪念 速记 memo flomo 笔记 灵感 capture note idea',
   run: () => { if (ctx.openView) ctx.openView('memos'); else say(t('hostTooOld'), { level: 'warning' }) },
@@ -1665,6 +2605,7 @@ ctx.registerCommand({
 const sbHandle = ctx.registerStatusItem?.({ id: 'quick', side: 'right', text: t('statusText'), title: t('statusTitle'), onClick: () => { void quickCapture() } })
 // 状态栏项是少数**能**运行时改文案的宿主面(handle.update):它跟着语言走,不必等重启。
 const offLocaleSb = ctx.subscribeLocale?.(() => {
+  notifyList() // 列表行的文案是 items() 算出来的,语言变了要重取
   try { sbHandle?.update?.({ text: t('statusText'), title: t('statusTitle') }) } catch { /* 旧宿主 handle 无 update */ }
 })
 
@@ -1675,14 +2616,16 @@ if (globalThis.__MEMOFLOW_TEST__) {
     monthSeq, isoWeekOf, dayKeyOf, dayKeyOfIso, monthKeyOf, daySerial, serialToKey, shiftDays,
     cacheFromMemos, bumpCacheObj, streakOf, buildDigestMessage, parseDigest, digestCorpus,
     safeHref, sanitizeFileName, renderMemoText, voiceAvailable, addMemo, quickCapture, memoToNote,
-    loadAll, rebuildCacheFromStore, onColorOf, readableOn, contrast, wfRoot, timeOfIso,
-    MSG, L, t, fmtDay, nMemos, nMonthFiles, joinList,
+    loadAll, rebuildCacheFromStore, upgradeCacheTags, wfRoot, timeOfIso, normTag, tagMatches,
+    MSG, L, t, fmtDay, shortDay, weekDay, nMemos, nMonthFiles, nSubTags, joinList,
+    buildTagIndex, suggestTags, listRows, listActiveKey, openRow, rowMenu, renameTagInText, renameTagInMonth, renameTagFlow, nav, setNav, keyedRows,
   })
 }
 
 return () => {
   if (offLocaleSb) offLocaleSb()
   if (sbHandle && sbHandle.dispose) sbHandle.dispose()
+  if (styleHandle && styleHandle.dispose) styleHandle.dispose()
   if (digest.controller) digest.controller.abort()
   stopRecHard()
 }

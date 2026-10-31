@@ -3,9 +3,16 @@
   "name": { "zh": "闪念盒", "en": "MemoFlow" },
   "icon": "zap",
   "iconFile": "icon.png",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "layout": {
-    "main": [{ "type": "plugin:memoflow:memos" }]
+    "left": [{ "type": "workspace", "params": { "mode": "plugin:memoflow:memos" }, "pinned": true }],
+    "main": [{ "type": "plugin:memoflow:memos" }],
+    "right": [{ "type": "plugin:memoflow:activity" }]
   },
-  "requires": { "views": ["plugin:memoflow:memos"] }
+  "mini": {
+    "name": { "zh": "闪念盒", "en": "MemoFlow" },
+    "view": { "type": "plugin:memoflow:quick" },
+    "mainView": { "type": "plugin:memoflow:memos" }
+  },
+  "requires": { "views": ["plugin:memoflow:memos", "plugin:memoflow:activity", "workspace"] }
 }

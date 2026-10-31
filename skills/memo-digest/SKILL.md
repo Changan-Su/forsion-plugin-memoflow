@@ -1,7 +1,7 @@
 ---
 name: MemoFlow Fleeting Notes
 description: Use when the user asks to read, search, summarize, digest, or edit their fleeting notes ("闪念" / memos) captured with the MemoFlow (闪念盒) plugin. Teaches the exact on-disk month-file format (### ISO-timestamp sections, inline #tags, ⚑pin/⌫arch sentinels), the derived cache, and the digest output conventions, so notes can be read and written without corrupting them.
-version: 1.1.0
+version: 1.2.0
 category: 知识管理
 ---
 
@@ -39,7 +39,7 @@ All paths are relative to the vault, inside the plugin's work folder (default **
 Rules:
 
 - One memo = a `### <ISO-8601 UTC timestamp>` heading + its body, running until the next `###` **timestamp** heading or EOF. A `###` line that is *not* an ISO timestamp is ordinary body text — do not treat it as a boundary.
-- Tags are inline `#<non-whitespace>` runs inside the body (`#中文` counts; `#123` pure digits and `#` followed by punctuation do not). Tags stay in the body text — never strip them.
+- Tags are `#` plus letters, digits, `_`, `-` or `/`, at the start of a line or after whitespace (`#中文` and `#a/b` count; `#123`, `#1/2`, `a.com/#frag` do not; `#设计,下周` is the tag `设计`). `#a` also matches `#a/b` when filtering. Tags stay in the body text — never strip them.
 - Status sentinels are plain-text markers at the very end of the body: `⚑pin` (pinned) and/or `⌫arch` (archived), space-separated, in that order. Example: `一条已归档的置顶 ⚑pin ⌫arch`.
 - Memos are append-ordered; timestamps are the memo's identity.
 
@@ -57,7 +57,7 @@ plugin owns is the *interface*, not the data.
 |---|---|
 | 「帮我记一条闪念」 — capture one memo | Do it yourself: append a `### <current UTC ISO timestamp>` section to the current month file per the contract above, then report which file it landed in. One round trip, no plugin needed. |
 | 「整理一下最近的闪念」 — digest / weekly review | Do it yourself: read the month files, follow the output conventions below, write the digest into `整理/` **inside the same work folder the month files live in** — never the literal default when the user has renamed it. The window is whatever the user asked for — do not assume a fixed one. (The plugin's own 「AI 周整理」 button needs the user signed in to Forsion; this path does not.) |
-| Timeline, tag filter, the 12-week heatmap, the daily-review card, 🎙 voice capture | Send them to the command palette 「闪念盒:打开」 (English UI: "MemoFlow: Open"). Say why: voice capture needs the microphone, and the rest are interactive states inside the view — neither exists engine-side. |
+| Timeline, tag filter, the 12-week heatmap, the daily-review card, voice capture | Send them to the command palette 「闪念盒:打开」 (English UI: "MemoFlow: Open"). Say why: voice capture needs the microphone, and the rest are interactive states inside the view — neither exists engine-side. |
 
 Whatever you write into a month file, the plugin parses normally the next time it opens. Only the
 derived stats lag, and **capturing another memo does not catch them up** — an existing cache is
