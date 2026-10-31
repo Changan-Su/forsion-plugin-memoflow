@@ -1799,6 +1799,30 @@ const RAW = [
   A.ok(ANIM.log.every((a) => a.kf.every((f) => !('transform' in f) && !('height' in f))), '减少动态效果:没有位移也没有高度补间')
   A.ok(ANIM.log.every((a) => a.ms <= 120), '减少动态效果:时长封顶 120')
   off3(); H3.dispose()
+  // 带位移的三处(Mini 新行、回顾牌堆、补全芯片)也要去掉位移
+  const julyRows2 = ['# 2026-07', '']
+  for (let i = 0; i < 6; i++) julyRows2.push(`### 2026-07-1${i}T02:00:00.000Z`, `旧念 ${i} #设计`, '')
+  _ls.set('plugin.memoflow.firstMonth', '2026-07')
+  const H4 = mkHost({ files: [['闪念盒/2026-07.md', julyRows2.join('\n')]] })
+  const elMain = mkEl('div'), elMini = mkEl('div')
+  const offMain = H4.view('memos').mount(elMain)
+  const offMini = H4.view('quick').mount(elMini)
+  await sleep(30)
+  ANIM.log.length = 0
+  const taMini = byTag(elMini, 'textarea')[0]
+  taMini.value = '#'
+  taMini.listeners.input.forEach((f) => f())
+  taMini.value = '安静的 Mini'
+  taMini.listeners.keydown[0]({ key: 'Enter', shiftKey: false, preventDefault() {} })
+  await sleep(10)
+  const topCalm = byAttr(elMain, 'data-review').find((c) => !c.attrs['aria-hidden'])
+  findAll(topCalm, (c) => c.tag === 'button' && c.textContent === '跳过')[0].listeners.click[0]()
+  await sleep(10)
+  A.ok(ANIM.log.length >= 3, `Mini、补全、牌堆都还有淡入淡出(见 ${ANIM.log.length})`)
+  A.ok(ANIM.log.every((a) => a.kf.every((f) => !('transform' in f))), '减少动态效果:Mini 新行、牌堆、补全都没有位移')
+  offMini(); offMain(); H4.dispose()
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+  _ls.delete('plugin.memoflow.reviewDone')
   delete globalThis.matchMedia
   ANIM.on = false
 }
