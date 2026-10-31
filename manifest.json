@@ -2,7 +2,7 @@
   "id": "memoflow",
   "name": "闪念盒",
   "nameEn": "MemoFlow",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "apiVersion": 1,
   "description": "flomo 式低摩擦速记:文字或语音随手记一条,自动按月落成你笔记库里的纯 Markdown 文件(<工作文件夹>/YYYY-MM.md,# 标签行内直打),左栏标签树、时间线、右栏 12 周热力图一目了然,在 Mini 窗口里也能随手记;每天从 7 天前更早的旧闪念里抽几条「每日回顾」再浮现,单条可一键转正式笔记;「AI 周整理」把近期闪念文本交给你自己的 Tangu 引擎按主题聚类成周报,产物写回 整理/ 文件夹。数据流向:闪念全部存在本地笔记库,语音走 Forsion 桌面自带的语音识别链路(不保存音频原文件),AI 周整理只把闪念文本发给你登录的 Forsion 后端,不经任何第三方服务。",
   "descriptionEn": "Low-friction capture, flomo style: jot a thought by typing or by voice and it lands as plain Markdown in your own vault, one file per month (<work folder>/YYYY-MM.md, with # tags written inline). A tag tree in the sidebar, a timeline and a 12-week heatmap keep it all in view, and the Mini window lets you capture without leaving what you are doing. Every day a few older memos (7+ days back) resurface as Daily Review cards, and any single memo can be turned into a real note in one click. AI Weekly Digest hands your recent memos to your own Tangu engine, which clusters them by theme into a weekly write-up saved back into the 整理/ folder. Where the data goes: memos never leave your local vault; voice goes through Forsion Desktop's own speech pipeline (no audio file is kept); AI Weekly Digest sends memo text only to the Forsion backend you are signed in to, never to a third party.",
