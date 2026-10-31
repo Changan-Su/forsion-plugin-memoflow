@@ -1806,6 +1806,24 @@ const RAW = [
   A.equal(pill2.hidden, true, '处理完胶囊也收掉')
   A.equal(_ls.get('plugin.memoflow.reviewDone'), '2026-08-06')
   off2(); H2.dispose()
+  // 另一个窗口看完回顾:这边的牌堆收掉,不留能继续操作的旧卡
+  {
+    _ls.delete('plugin.memoflow.reviewDone')
+    const listeners = {}, win0 = globalThis.window
+    globalThis.window = { tangu: {}, addEventListener: (k, f) => { listeners[k] = f }, removeEventListener: (k) => { delete listeners[k] } }
+    const H4 = mkHost({ files: [['闪念盒/2026-07.md', julyRows.join('\n')]] })
+    const el4 = mkEl('div')
+    const off4 = H4.view('memos').mount(el4)
+    await sleep(30)
+    findAll(el4, (c) => c.className === 'mf-revpill')[0].listeners.click[0]()
+    A.ok(byAttr(el4, 'data-review').length > 0, '牌堆开着')
+    _ls.set('plugin.memoflow.reviewDone', '2026-08-06')
+    listeners.storage({ key: 'plugin.memoflow.reviewDone', newValue: '2026-08-06' })
+    await sleep(10)
+    A.equal(byAttr(el4, 'data-review').length, 0, '另一窗口看完,这边收掉')
+    off4(); H4.dispose()
+    globalThis.window = win0
+  }
   _ls.set('plugin.memoflow.firstMonth', '2026-08')
   _ls.delete('plugin.memoflow.reviewDone')
 
