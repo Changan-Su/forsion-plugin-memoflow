@@ -35,7 +35,7 @@ A.ok(!/color:\s*#fff/i.test(src), 'CSS 不许写死白字')
 A.ok(!/::-webkit-scrollbar/.test(src), 'DESIGN §6:全局禁写 ::-webkit-scrollbar')
 A.ok(!/[\s:]1\.5px/.test(src), '不用 1.5px 线框')
 A.ok(!/[🎙📌]/u.test(src), '词表里没有 emoji')
-A.ok(!/--mf-/.test(src), '样式只用宿主 token,不再派生 --mf-*')
+A.ok(!/--mf-(?!dock-h\b)/.test(src), '样式只用宿主 token,不再派生 --mf-*;--mf-dock-h 是量出来的高度,不是主题')
 {
   const lines = src.split('\n')
   const asi = [...lines.keys()].filter((i) => {
@@ -544,8 +544,12 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
   A.ok(mountEl.textContent.includes('<img'), '恶意串以字面文字展示')
   const memosShown = byAttr(mountEl, 'data-memo')
   A.ok(memosShown.length >= 4, `时间线渲染条目(见 ${memosShown.length} 条,归档默认隐藏)`)
-  A.ok(mountEl.textContent.includes('置顶'), '置顶分组/徽标可见')
+  A.ok(T.listRows().some((r) => r.key === 'nav:pinned' && r.title === '已置顶'), '置顶改成左栏一行')
+  A.ok(!mountEl.textContent.includes('置顶 ·'), '时间线里不再有置顶分组')
   A.ok(!mountEl.textContent.includes('归档的 ⌫arch'), '哨兵不外漏')
+  A.equal(byAttr(mountEl, 'data-review').length, 0, '回顾平时收在胶囊里')
+  const openReview = (root) => { const p = findAll(root, (c) => c.className === 'mf-revpill')[0]; if (p.attrs['aria-expanded'] !== 'true') p.listeners.click[0]() }
+  openReview(mountEl)
   const reviewCards = byAttr(mountEl, 'data-review')
   A.ok(reviewCards.length >= 1 && reviewCards.length <= 4, `每日回顾条出现(${reviewCards.length} 卡)`)
   A.ok(byAttr(mountEl, 'data-voice').length === 1, '语音桥在场 → 语音按钮渲染')
@@ -603,7 +607,7 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
   // ── 视图变更 × 并发落库:persistMonth 与 addMemo 同队列且回灌磁盘新条,先写者不被覆盖 ──
   {
     const pinnedBefore = T.parseMonth(V.get('闪念盒/2026-08.md')).memos.filter((m) => m.pinned).length
-    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶')[0]
+    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶').at(-1)
     A.ok(pinBtn, '时间线上有可置顶的行')
     const pAdd = T.addMemo('并发期间落的一条') // 模拟状态栏 quickCapture 与视图操作同时发生
     pinBtn.listeners.click[0]()
@@ -620,7 +624,7 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
     const monthP = '闪念盒/2026-08.md'
     const pinnedBefore = T.parseMonth(V.get(monthP)).memos.filter((m) => m.pinned).length
     V.set(monthP, V.get(monthP) + ['### 2026-08-06T05:59:59.000Z', '外部落的一条', ''].join('\n'))
-    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶')[0]
+    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶').at(-1)
     A.ok(pinBtn, '时间线上还有可置顶的行')
     pinBtn.listeners.click[0]()
     await sleep(40)
@@ -655,7 +659,7 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
     const before = V.get(monthP)
     const notesBefore = reg.notes.length
     failRead = (p) => p === monthP
-    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶')[0]
+    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶').at(-1)
     A.ok(pinBtn, '时间线上有可置顶的行(读失败窗口)')
     pinBtn.listeners.click[0]()
     await sleep(40)
@@ -668,7 +672,7 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
     const monthP = '闪念盒/2026-08.md'
     const before = V.get(monthP)
     V.delete(monthP)
-    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶')[0]
+    const pinBtn = findAll(mountEl, (c) => c.tag === 'button' && c.textContent === '置顶').at(-1)
     pinBtn.listeners.click[0]()
     await sleep(40)
     A.ok(!V.has(monthP), '月文件缺席:置顶拒改,不得用陈旧 store 重建整月')
@@ -1524,9 +1528,10 @@ const RAW = [
   A.deepEqual(Object.keys(sg[0]).sort(), ['hint', 'label', 'value'], '补全行形状(与宿主的约定,README 有记录)')
   A.equal(sg[0].value, '#产品', 'value 带触发符:宿主用它替换「# + 已输入」')
   const hashBtn = findAll(box.toolbar, (c) => c.tag === 'button' && c.attrs['aria-label'] === '打标签')[0]
+  A.equal(box.focused, 1, '桌面进来聚焦输入卡')
   hashBtn.listeners.click[0]()
   A.deepEqual(box.inserted, ['#'], '# 按钮走 insertText')
-  A.equal(box.focused, 1, '# 按钮后焦点回输入框')
+  A.equal(box.focused, 2, '# 按钮后焦点回输入框')
   box.opts.onChange({ text: '已有字' })
   hashBtn.listeners.click[0]()
   A.equal(box.inserted[1], ' #', '有字时补空格,否则 # 不算标签')
@@ -1601,7 +1606,7 @@ const RAW = [
   A.equal(space.layout.left[0].params.mode, 'plugin:memoflow:memos', '左栏是列表源')
   A.equal(space.layout.right[0].type, 'plugin:memoflow:activity', '右栏是活动视图')
   const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'))
-  A.equal(manifest.version, '2.0.0')
+  A.equal(manifest.version, '2.1.0')
   A.equal(manifest.onboarding.steps.length, manifest.onboarding.en.steps.length, 'onboarding 中英同数')
   A.ok(!/🎙/.test(JSON.stringify(manifest)), 'onboarding 不再提 emoji 按钮')
 
@@ -1637,8 +1642,8 @@ const RAW = [
   A.equal(rows().length, 2, '断点是 480')
   await H.reg.boxes[0].opts.onSubmit({ text: '在 Mini 记的 #设计' })
   await sleep(10)
-  A.ok(rows()[0].includes('在 Mini 记的'), '记完留在 Mini,新行在最上面')
-  A.ok(rows()[0].includes('刚刚'), '确认行写「刚刚」')
+  A.ok(rows().at(-1).includes('在 Mini 记的'), '记完留在 Mini,新行贴着输入卡')
+  A.ok(rows().at(-1).includes('刚刚'), '确认行写「刚刚」')
   A.equal(H.reg.boxes[0].focused, 0, '记完不动焦点')
   const tagChip = chips().find((c) => c.textContent === '设计')
   tagChip.listeners.click[0]()
@@ -1754,18 +1759,20 @@ const RAW = [
   A.ok(ANIM.log.some((a) => a.ms === 200 && a.easing === 'cubic-bezier(.22,1,.36,1)'), '高度用 surface 曲线')
   H.T.setNav({ tags: [] })
   await sleep(5)
-  // 记下:新行长高 320,飞行 420
+  // 记下:整张列表一次 transform 托上去 420,新行淡入 140,输入框字影 200
   ANIM.log.length = 0
   const ta = byTag(el, 'textarea')[0]
-  ta.value = '飞一条'
+  ta.value = '升一条'
   ta.listeners.keydown[0]({ key: 'Enter', shiftKey: false, preventDefault() {} })
   await sleep(10)
-  A.ok(durs().includes(320), `记下:新行长高 320(见 ${durs()})`)
-  A.ok(durs().includes(420), '记下:飞行 420')
-  A.ok(frames().some((k) => /^translate\(/.test(String(k[1].transform))), '飞行是位移')
-  A.ok(!findAll(el, (c) => c.className === 'mf-fly').length, '飞完收掉')
-  const fresh = byAttr(el, 'data-memo')[0]
-  A.ok(fresh.textContent.includes('刚刚'), '新行写「刚刚」')
+  const rise = ANIM.log.find((a) => a.ms === 420)
+  A.ok(rise && /mf-list/.test(rise.el.className) && /^translateY\(/.test(String(rise.kf[0].transform)) && rise.kf[1].transform === 'none', `记下:整张列表一次托上去(见 ${durs()})`)
+  A.equal(rise.easing, 'cubic-bezier(.2,.8,.3,1)', '曲线同 Chat 的 sendFlight')
+  A.ok(durs().includes(140) && durs().includes(200), '新行淡入 140 + 字影 200')
+  A.ok(!ANIM.log.some((a) => a.kf.some((f) => f.height != null)), '记下不补间高度:逐帧改高度会抖')
+  A.ok(!findAll(el, (c) => c.className === 'mf-ghost').length, '字影放完收掉')
+  const fresh = byAttr(el, 'data-memo').at(-1)
+  A.ok(fresh.textContent.includes('刚刚'), '新行写「刚刚」,排在最后')
   // 回顾牌堆
   ANIM.log.length = 0
   _ls.delete('plugin.memoflow.reviewDone')
@@ -1777,6 +1784,11 @@ const RAW = [
   const el2 = mkEl('div')
   const off2 = H2.view('memos').mount(el2)
   await sleep(30)
+  ANIM.log.length = 0
+  const pill2 = findAll(el2, (c) => c.className === 'mf-revpill')[0]
+  pill2.listeners.click[0]()
+  A.ok(ANIM.log.some((a) => a.ms === 200 && a.kf[0].transform === 'translateY(6px)'), '牌堆点开上浮 6px')
+  A.equal(pill2.attrs['aria-expanded'], 'true')
   ANIM.log.length = 0
   const top = byAttr(el2, 'data-review').find((c) => !c.attrs['aria-hidden'])
   findAll(top, (c) => c.tag === 'button' && c.textContent === '跳过')[0].listeners.click[0]()
@@ -1791,8 +1803,27 @@ const RAW = [
     await sleep(10)
   }
   A.equal(byAttr(el2, 'data-review').length, 0, '0 张整块收起')
+  A.equal(pill2.hidden, true, '处理完胶囊也收掉')
   A.equal(_ls.get('plugin.memoflow.reviewDone'), '2026-08-06')
   off2(); H2.dispose()
+  // 另一个窗口看完回顾:这边的牌堆收掉,不留能继续操作的旧卡
+  {
+    _ls.delete('plugin.memoflow.reviewDone')
+    const listeners = {}, win0 = globalThis.window
+    globalThis.window = { tangu: {}, addEventListener: (k, f) => { listeners[k] = f }, removeEventListener: (k) => { delete listeners[k] } }
+    const H4 = mkHost({ files: [['闪念盒/2026-07.md', julyRows.join('\n')]] })
+    const el4 = mkEl('div')
+    const off4 = H4.view('memos').mount(el4)
+    await sleep(30)
+    findAll(el4, (c) => c.className === 'mf-revpill')[0].listeners.click[0]()
+    A.ok(byAttr(el4, 'data-review').length > 0, '牌堆开着')
+    _ls.set('plugin.memoflow.reviewDone', '2026-08-06')
+    listeners.storage({ key: 'plugin.memoflow.reviewDone', newValue: '2026-08-06' })
+    await sleep(10)
+    A.equal(byAttr(el4, 'data-review').length, 0, '另一窗口看完,这边收掉')
+    off4(); H4.dispose()
+    globalThis.window = win0
+  }
   _ls.set('plugin.memoflow.firstMonth', '2026-08')
   _ls.delete('plugin.memoflow.reviewDone')
 
@@ -1831,6 +1862,7 @@ const RAW = [
   taMini.value = '安静的 Mini'
   taMini.listeners.keydown[0]({ key: 'Enter', shiftKey: false, preventDefault() {} })
   await sleep(10)
+  findAll(elMain, (c) => c.className === 'mf-revpill')[0].listeners.click[0]()
   const topCalm = byAttr(elMain, 'data-review').find((c) => !c.attrs['aria-hidden'])
   findAll(topCalm, (c) => c.tag === 'button' && c.textContent === '跳过')[0].listeners.click[0]()
   await sleep(10)
@@ -1841,6 +1873,65 @@ const RAW = [
   _ls.delete('plugin.memoflow.reviewDone')
   delete globalThis.matchMedia
   ANIM.on = false
+}
+
+// ── 底部输入:悬浮层、最新在下、筛选条、置顶、回到最新 ──
+{
+  const H = mkHost({ files: [[AUGP, TAGGED]], chatBox: 'new' })
+  const el = mkEl('div')
+  const off = H.view('memos').mount(el)
+  await sleep(30)
+  const root = el.children.find((c) => c.className === 'mf-root')
+  const scroll = root.children.find((c) => c.className === 'mf-scroll')
+  const dock = root.children.find((c) => c.className === 'mf-dock')
+  A.ok(dock && findAll(dock, (c) => c.className === 'mf-composer').length === 1, '输入卡在悬浮层里')
+  A.equal(findAll(scroll, (c) => c.className === 'mf-composer').length, 0, '输入卡不在滚动区里')
+  A.ok(findAll(dock, (c) => /mf-flt/.test(c.className || '')).length === 1, '筛选条跟着输入卡')
+  const box = H.reg.boxes[0]
+  A.equal(findAll(box.toolbar, (c) => c.className === 'mf-revpill').length, 1, '回顾胶囊在 ChatBox 底排')
+  const texts = byAttr(el, 'data-memo').map((r) => r.textContent)
+  await box.opts.onSubmit({ text: '最新的一条' })
+  await sleep(10)
+  A.ok(byAttr(el, 'data-memo').at(-1).textContent.includes('最新的一条'), '新闪念排在列表最后,贴着输入卡')
+  A.equal(byAttr(el, 'data-memo').length, texts.length + 1)
+  // 筛选里记一条不匹配的:筛选保持,提示一行
+  H.T.setNav({ tags: ['设计'] })
+  await sleep(5)
+  const said = H.reg.notes.length
+  await box.opts.onSubmit({ text: '不带标签的一条' })
+  await sleep(10)
+  A.deepEqual(H.T.nav.tags, ['设计'], '筛选保持')
+  A.ok(H.reg.notes.slice(said).some(([m]) => String(m).includes('不在当前筛选里')), '提示已记下但不在筛选里')
+  await box.opts.onSubmit({ text: '带标签的一条 #设计' })
+  await sleep(10)
+  A.equal(H.reg.notes.slice(said).filter(([m]) => String(m).includes('不在当前筛选里')).length, 1, '匹配筛选时不提示')
+  H.T.setNav({ tags: [] })
+  await sleep(5)
+  // 翻在上面:别处来的新闪念只加计数;发送回到底
+  const jump = root.children.find((c) => c.className === 'mf-jump')
+  A.equal(jump.hidden, true, '在底部时没有回到最新')
+  scroll.clientHeight = 300
+  scroll.scrollTop = -500
+  scroll.listeners.scroll[0]()
+  A.equal(jump.hidden, false, '离底超过一屏出现回到最新')
+  H.V.set(AUGP, H.V.get(AUGP) + '\n### 2026-08-06T04:30:00.000Z\n别的窗口来的\n')
+  await H.T.loadStore(true)
+  await sleep(10)
+  A.ok(/回到最新 · 1/.test(jump.textContent), `翻在上面只加计数(见 ${jump.textContent})`)
+  A.equal(scroll.scrollTop, -500, '不抢滚动位置')
+  scroll.scrollTop = 0
+  scroll.listeners.scroll[0]()
+  A.equal(jump.hidden, true, '回到底收掉')
+  // 读过的不再算未读(评审 P2):回到底再翻上去,重画后计数还是 0
+  scroll.scrollTop = -500
+  scroll.listeners.scroll[0]()
+  H.T.setNav({ tags: [] }, 'none')
+  await sleep(5)
+  scroll.scrollTop = -500
+  await H.T.loadStore(true)
+  await sleep(10)
+  A.ok(!/·/.test(jump.textContent), `读过的不算未读(见 ${jump.textContent})`)
+  off(); H.dispose()
 }
 
 // ── 评审补的并发断言:跨窗口写锁 · 扫描窗口 · 确认期间的新月份 · 缓存升级 · 后台刷新 · 只有左栏 ──
