@@ -707,9 +707,12 @@ function upgradeCacheTags() {
     if (YM_RE.test(ym) && (!firstMonth() || ym < firstMonth())) setFirstMonth(ym)
     const all = await loadAll()
     if (all.failedMonths.length) return false
-    c.tags = cacheFromMemos(flatten(all).map((x) => x.m)).tags
-    c.v = CACHE_V
-    await writeCacheFile(c)
+    // 扫描期间别的窗口可能记了一条:重读再写,旧对象上的 days 写回去会抹掉那条证词
+    const latest = await readCacheFileRaw()
+    if (!latest || latest.v === CACHE_V) return false
+    latest.tags = cacheFromMemos(flatten(all).map((x) => x.m)).tags
+    latest.v = CACHE_V
+    await writeCacheFile(latest)
     return true
   })
 }
@@ -739,14 +742,22 @@ const bus = (() => {
 
 // ── 写通道串行队列(读-改-写全程排队:并发落库 / 视图变更绝不互相覆盖) ──────
 let writeChain = Promise.resolve()
+// Mini 是另一个窗口,writeChain 管不到它:读-改-写再套一把跨窗口的 Web Lock,否则两边各写各的会互相覆盖整月。
 function enqueueWrite(job) {
-  const p = writeChain.then(job)
+  const locks = globalThis.navigator && navigator.locks
+  const guarded = locks && locks.request ? () => locks.request(`plugin.${PLUGIN_ID}.write`, job) : job
+  const p = writeChain.then(guarded)
   writeChain = p.then(() => {}, () => {})
   return p
 }
 
 // ── 共享数据:左栏、主视图、活动栏、Mini 同一份(同一窗口经 bus,跨窗口经 pulse / watchFile) ──
-const db = { map: new Map(), loading: true, error: '', started: false, pending: null }
+const db = { map: new Map(), loading: true, error: '', started: false, pending: null, dirty: null }
+/** 换掉一个月的内容。全量加载进行中时记下来:加载的快照可能比这次写入旧,收尾要重读这个月。 */
+function setMonth(ym, list) {
+  db.map.set(ym, list)
+  if (db.dirty) db.dirty.add(ym)
+}
 let tagIdx = null
 let mainMounts = 0
 let styleHandle = null
@@ -766,7 +777,14 @@ function loadStore(quiet) {
   if (db.pending) return db.pending
   if (!quiet) { db.loading = true; db.error = ''; touched({ type: 'store' }) }
   db.pending = (async () => {
+    db.dirty = new Set()
     try { db.map = await loadAll(); db.error = '' } catch (e) { db.error = (e && e.message) || String(e) }
+    while (db.dirty.size) { // 重读途中又有写入就再来一轮
+      const months = [...db.dirty]
+      db.dirty.clear()
+      for (const ym of months) await reloadMonth(ym)
+    }
+    db.dirty = null
     db.loading = false
     db.pending = null
     const failed = db.map.failedMonths || []
@@ -859,7 +877,7 @@ async function addMemoInner(rawText) {
   } catch { c = null }
   trackAchievements(c)
   ctx.activity?.log('capture', { text: text.slice(0, 60) })
-  if (db.started && !db.loading) db.map.set(ym, memos)
+  if (db.started && (!db.loading || db.dirty)) setMonth(ym, memos)
   pulse(ym)
   touched({ type: 'added', ym, ts: memo.ts })
   return memo
@@ -1586,21 +1604,32 @@ async function applyTagRename(from, to) {
   return enqueueWrite(async () => {
     const plan = await planTagRename(from, to) // 确认框开着的时候文件可能变了:以此刻的磁盘为准
     const sub = { days: {}, tags: {}, total: 0 }, add = { days: {}, tags: {}, total: 0 }
+    const seen = {} // 这些月份的日计数:缓存里没有的要补上,否则改完的月份没有防覆盖证词
     const sum = (into, c) => {
       for (const k of Object.keys(c.tags)) into.tags[k] = (into.tags[k] || 0) + c.tags[k]
     }
     let count = 0
-    for (const p of plan) {
-      try { await ctx.app.writeFile(monthPath(p.ym), p.next) }
-      catch (e) { const err = new Error((e && e.message) || String(e)); err.partial = count; throw err } // 再改一次能接着补完:已改的不再命中
-      const before = parseMonth(p.raw).memos, after = parseMonth(p.next).memos
-      sum(sub, cacheFromMemos(before)); sum(add, cacheFromMemos(after))
-      db.map.set(p.ym, after)
-      count += p.memos
+    for (const { ym } of plan) {
+      // 扫完全部月份要一会儿:每个月写之前重读一次,读写挨着,扫描期间追加的条不被盖掉
+      let raw, r
+      try {
+        raw = await readMonthText(ym)
+        if (!raw) throw new Error(t('readMonthFail', { ym, msg: t('tagMonthGone') }))
+        r = renameTagInMonth(raw, from, to)
+        if (r.memos) await ctx.app.writeFile(monthPath(ym), r.text)
+      } catch (e) { const err = new Error((e && e.message) || String(e)); err.partial = count; throw err } // 再改一次能接着补完:已改的不再命中
+      if (!r.memos) continue
+      const before = parseMonth(raw).memos, after = parseMonth(r.text).memos
+      const fresh = cacheFromMemos(after)
+      sum(sub, cacheFromMemos(before)); sum(add, fresh)
+      Object.assign(seen, fresh.days)
+      monthKnownCounts.set(ym, after.length) // 确认期间才出现的月份也要留证词
+      setMonth(ym, after)
+      count += r.memos
     }
     try {
       const c = await readCacheFileRaw()
-      if (c && plan.length) { applyCacheDelta(c, sub, add); c.builtAt = Date.now(); await writeCacheFile(c) }
+      if (c && plan.length) { applyCacheDelta(c, sub, add); for (const d of Object.keys(seen)) if (!c.days[d]) { c.days[d] = seen[d]; c.total += seen[d] } c.builtAt = Date.now(); await writeCacheFile(c) }
     } catch { /* 派生物:写不上就等「重建缓存」,闪念已经改好了 */ }
     return count
   })
@@ -1660,7 +1689,7 @@ async function persistMonthOp(ym, apply) {
     const arr = disk
     const before = cacheFromMemos(arr)
     apply(arr)
-    db.map.set(ym, arr)
+    setMonth(ym, arr)
     await writeMonth(ym, arr)
     // 缓存走增量补丁,绝不由 store 全量重建 —— store 可能缺读失败的月份,全量重建会把防覆盖证词清零(P0 链条)。
     try {
@@ -2529,7 +2558,7 @@ ctx.registerListSource?.({
   search: true,
   empty: { icon: 'zap', title: pText('emptyTitle'), line: pText('emptyHint') },
   items: listRows,
-  subscribe(cb) { listSubs.add(cb); ensureStore(); return () => { listSubs.delete(cb) } },
+  subscribe(cb) { listSubs.add(cb); startSync(); ensureStore(); return () => { listSubs.delete(cb); stopSync() } },
   activeKey: listActiveKey,
   open: openRow,
   itemMenu: rowMenu,

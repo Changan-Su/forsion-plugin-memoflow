@@ -1827,6 +1827,94 @@ const RAW = [
   ANIM.on = false
 }
 
+// ── 评审补的并发断言:跨窗口写锁 · 扫描窗口 · 确认期间的新月份 · 缓存升级 · 后台刷新 · 只有左栏 ──
+{
+  // 两个窗口(两份插件实例)共享磁盘,同时记一条:都要落下
+  const realNav = globalThis.navigator
+  let tail = Promise.resolve()
+  const locks = { request: (name, job) => { const r = tail.then(job); tail = r.then(() => {}, () => {}); return r } }
+  Object.defineProperty(globalThis, 'navigator', { value: { ...realNav, mediaDevices: realNav.mediaDevices, locks }, configurable: true, writable: true })
+  const A1 = mkHost({ files: [[AUGP, mdOf(['01T02', '已有'])]] })
+  const B1 = mkHost(); B1.ctx.app.readFile = A1.ctx.app.readFile; B1.ctx.app.writeFile = A1.ctx.app.writeFile
+  await Promise.all([A1.T.addMemo('主窗口记的'), B1.T.addMemo('Mini 窗口记的')])
+  const both = A1.V.get(AUGP)
+  A1.dispose(); B1.dispose()
+  Object.defineProperty(globalThis, 'navigator', { value: realNav, configurable: true, writable: true })
+  A.ok(both.includes('主窗口记的') && both.includes('Mini 窗口记的'), '两个窗口同时记:跨窗口写锁让两条都落下')
+
+  // 扫描期间追加到先扫过的月份:写之前重读
+  _ls.set('plugin.memoflow.firstMonth', '2026-07')
+  const JUL = '闪念盒/2026-07.md'
+  const H = mkHost({ files: [[JUL, '# 2026-07\n\n### 2026-07-01T02:00:00.000Z\n七月 #产品\n'], [AUGP, mdOf(['01T02', '八月 #产品'])]], prompt: ['项目'] })
+  const offL = H.list().subscribe(() => {})
+  await sleep(30)
+  const rd = H.ctx.app.readFile
+  let augReads = 0
+  H.ctx.app.readFile = async (p) => {
+    if (p === AUGP && ++augReads === 2) H.V.set(JUL, `${H.V.get(JUL)}\n### 2026-07-02T02:00:00.000Z\n扫描期间写进来的 #产品\n`)
+    return rd(p)
+  }
+  await H.T.renameTagFlow('产品', 'rename')
+  A.ok(H.V.get(JUL).includes('扫描期间写进来的 #项目'), '扫描期间追加的条不被整月写覆盖')
+  offL(); H.dispose()
+
+  // 确认期间才出现的当月:改名写过之后要留证词
+  const H2 = mkHost({ files: [[JUL, '# 2026-07\n\n### 2026-07-01T02:00:00.000Z\n七月 #产品\n']], prompt: ['项目'] })
+  const offL2 = H2.list().subscribe(() => {})
+  await sleep(30)
+  H2.ctx.ui.confirm = async () => { H2.V.set(AUGP, mdOf(['01T02', '确认时新建的月 #产品'])); return true }
+  await H2.T.renameTagFlow('产品', 'rename')
+  const saved = H2.V.get(AUGP)
+  A.ok(saved.includes('#项目'))
+  A.ok(Object.keys(JSON.parse(H2.V.get(CACHEP)).days).some((d) => d.startsWith('2026-08')), '改名写过的月份进缓存证词')
+  H2.V.delete(AUGP); H2.V.delete(CACHEP) // 模拟折叠宿主:读失败 = null;缓存也没了,只剩会话证词
+  let refused = null
+  try { await H2.T.addMemo('不该覆写') } catch (e) { refused = e }
+  A.ok(refused, '改名写过的月份有证词:读到 null 时拒写')
+  offL2(); H2.dispose()
+
+  // 缓存升级:扫描期间别的窗口加的 days 不被旧对象写回去抹掉
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+  const stale = JSON.stringify({ days: { '2026-08-01': 1 }, tags: {}, total: 1, builtAt: 1 })
+  const H3 = mkHost({ files: [[CACHEP, stale], [AUGP, mdOf(['01T02', 'x #a'])]] })
+  const rd3 = H3.ctx.app.readFile
+  H3.ctx.app.readFile = async (p) => {
+    if (p === AUGP) H3.V.set(CACHEP, JSON.stringify({ days: { '2026-08-01': 1, '2026-08-02': 1 }, tags: {}, total: 2, builtAt: 2 }))
+    return rd3(p)
+  }
+  await H3.T.upgradeCacheTags()
+  A.equal(JSON.parse(H3.V.get(CACHEP)).days['2026-08-02'], 1, '升级时重读缓存:别的窗口加的证词还在')
+  H3.dispose()
+
+  // 后台全量刷新途中记一条:刷新的旧快照不盖掉它
+  const H4 = mkHost({ files: [[AUGP, mdOf(['01T02', '老的'])]], watch: true })
+  const listeners = {}
+  globalThis.window = { tangu: {}, addEventListener: (k, f) => { listeners[k] = f }, removeEventListener() {} }
+  const el4 = mkEl('div')
+  const off4 = H4.view('memos').mount(el4)
+  await sleep(30)
+  const rd4 = H4.ctx.app.readFile
+  let armed = true
+  H4.ctx.app.readFile = async (p) => {
+    const v = await rd4(p)
+    if (p === AUGP && armed) { armed = false; await H4.T.addMemo('刷新途中记的') }
+    return v
+  }
+  listeners.storage({ key: 'plugin.memoflow.pulse', newValue: '|x' })
+  await sleep(30)
+  A.ok(byAttr(el4, 'data-memo').some((r) => r.textContent.includes('刷新途中记的')), '后台刷新不盖掉途中记的那条')
+  off4(); H4.dispose()
+  globalThis.window = { tangu: {} }
+
+  // 只开着左栏也收跨窗口更新
+  const H5 = mkHost({ watch: true })
+  const off5 = H5.list().subscribe(() => {})
+  A.equal(H5.reg.watch.size, 1, '左栏订阅时也接上同步')
+  off5()
+  A.equal(H5.reg.watch.size, 0, '退订时收回')
+  H5.dispose()
+}
+
 // ── 主视图骨架:重建缓存进 ⋯ 菜单,草稿不被刷新吃掉 ──
 {
   const H = mkHost({ files: [[AUGP, TAGGED]] })
