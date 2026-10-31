@@ -52,9 +52,9 @@ const MSG = {
     stats: '共 {c} · 连续 {d} 天',
     inputPlaceholder: '现在在想什么?Enter 发送,Shift+Enter 换行,# 打标签',
     btnSend: '记下',
-    btnVoice: '🎙 语音',
-    btnVoiceStop: '● 结束录音',
-    btnVoiceBusy: '⋯ 转写中',
+    btnVoice: '语音',
+    btnVoiceStop: '结束录音',
+    btnVoiceBusy: '转写中',
     voiceHint: '按住说话,或点击开始 / 再点结束',
     searchPlaceholder: '搜索闪念…',
     btnCancel: '取消',
@@ -107,7 +107,7 @@ const MSG = {
     emptyTitle: '还没有闪念',
     emptyHint: '上面输入框随手记一条;Enter 发送。也可以用状态栏「✎ 闪念」或命令面板「闪念盒:快速记一条」。',
     noMatch: '没有匹配的闪念',
-    pinnedGroup: '📌 置顶 · {n} 条',
+    pinnedGroup: '置顶 · {n} 条',
     dayToday: '今天',
     dayYesterday: '昨天',
     flagPinned: '置顶',
@@ -157,9 +157,9 @@ const MSG = {
     stats: '{c} · {d}-day streak',
     inputPlaceholder: "What's on your mind? Enter to send, Shift+Enter for a new line, # to tag",
     btnSend: 'Capture',
-    btnVoice: '🎙 Voice',
-    btnVoiceStop: '● Stop',
-    btnVoiceBusy: '⋯ Transcribing',
+    btnVoice: 'Voice',
+    btnVoiceStop: 'Stop',
+    btnVoiceBusy: 'Transcribing',
     voiceHint: 'Hold to talk, or click to start and click again to stop',
     searchPlaceholder: 'Search memos…',
     btnCancel: 'Cancel',
@@ -212,7 +212,7 @@ const MSG = {
     emptyTitle: 'No memos yet',
     emptyHint: 'Jot one down in the box above and press Enter. You can also use the "✎ Memo" status bar button or the "MemoFlow: Quick Capture" command.',
     noMatch: 'No memos match',
-    pinnedGroup: '📌 Pinned · {n}',
+    pinnedGroup: 'Pinned · {n}',
     dayToday: 'Today',
     dayYesterday: 'Yesterday',
     flagPinned: 'Pinned',
@@ -433,22 +433,43 @@ function serializeMonth(ym, memos, preamble) {
   return parts.join('\n')
 }
 
-// ── 标签(#非空白串;# 后接标点/纯数字不算;行内多个都算) ────────────────────
+// ── 标签(和 Amadeus 同一口径,闪念盒自带一份,关着 Amadeus 也能用) ────────────
+// TAG_RE / NOT_TAG / normTag / tagMatches 与 Genesis shared/amadeus/links.ts 逐字同义,check.mjs 里有一组对照样例。
+// # 前面必须是行首或空白(a.com/#frag 不算);字符集到标点为止(「#设计,下周再说」只取「设计」)。
+const TAG_RE = /(?:^|\s)#([\p{L}\p{N}_/-]+)/gu
+const NOT_TAG = /^[0-9/]+$/ // #1、#1/2 不是标签
+/** 这段文字里的标签,按出现顺序去重(大小写不敏感,留最先出现的写法)。 */
 function extractTags(text) {
-  const out = []
-  const re = /#([^\s#]+)/g
+  const re = new RegExp(TAG_RE.source, TAG_RE.flags)
   const s = String(text == null ? '' : text)
+  const out = [], seen = new Set()
   let m
   while ((m = re.exec(s))) {
     const t = m[1]
-    if (/^\d+$/.test(t)) continue
-    if (/^[\p{P}\p{S}]/u.test(t)) continue
-    if (!out.includes(t)) out.push(t)
+    if (NOT_TAG.test(t)) continue
+    const k = t.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(t)
   }
   return out
 }
+/** 标签归一(用户输入的名字):去空白与前导 #;不合字符集或纯数字 → null。 */
+function normTag(raw) {
+  const t = String(raw == null ? '' : raw).trim().replace(/^#/, '')
+  return !t || !/^[\p{L}\p{N}_/-]+$/u.test(t) || NOT_TAG.test(t) ? null : t
+}
+/** 嵌套标签前缀匹配:查 work 命中 work 与 work/urgent,不命中 workshop。大小写不敏感。 */
+function tagMatches(tag, query) {
+  const t = String(tag == null ? '' : tag).toLowerCase()
+  const q = String(query == null ? '' : query).trim().replace(/^#/, '').replace(/\/+$/, '').toLowerCase()
+  return !!q && (t === q || t.startsWith(`${q}/`))
+}
 
 // ── 派生缓存(纯派生,任何时候可全量重建;增量 == 全量,check 有等式断言) ────
+// v 变了 = 派生规则变了(v2:标签解析对齐 Amadeus)。旧版缓存的 days 仍是写前防线的证词,不能当缺席;
+// 只有 tags 是错的 → upgradeCacheTags 只换 tags 表,days / total 一个字不碰。
+const CACHE_V = 2
 function bumpCacheObj(c, memo) {
   const day = dayKeyOfIso(memo.ts)
   if (day) c.days[day] = (c.days[day] || 0) + 1
@@ -457,7 +478,7 @@ function bumpCacheObj(c, memo) {
   return c
 }
 function cacheFromMemos(memos) {
-  const c = { days: {}, tags: {}, total: 0, builtAt: 0 }
+  const c = { v: CACHE_V, days: {}, tags: {}, total: 0, builtAt: 0 }
   for (const m of memos || []) bumpCacheObj(c, m)
   return c
 }
@@ -591,6 +612,25 @@ function applyCacheDelta(c, sub, add) {
   for (const k of Object.keys(sub.tags)) patch(c.tags, k, -sub.tags[k])
   for (const k of Object.keys(add.tags)) patch(c.tags, k, add.tags[k])
   c.total = Math.max(0, (c.total || 0) - sub.total + add.total)
+}
+
+/** 旧版缓存就地升级:按新规则重算 tags。月份没读全就不动(下次打开再试),错标签留一会儿,证词不受影响。 */
+function upgradeCacheTags() {
+  return enqueueWrite(async () => {
+    let c
+    try { c = await readCacheFileRaw() } catch { return false }
+    if (!c || c.v === CACHE_V) return false
+    // 新设备上 firstMonth 还没记:缓存里最早的月份就是扫描起点,否则旧月份的标签重算不到
+    const earliest = Object.keys(c.days).sort()[0]
+    const ym = earliest ? earliest.slice(0, 7) : ''
+    if (YM_RE.test(ym) && (!firstMonth() || ym < firstMonth())) setFirstMonth(ym)
+    const all = await loadAll()
+    if (all.failedMonths.length) return false
+    c.tags = cacheFromMemos(flatten(all).map((x) => x.m)).tags
+    c.v = CACHE_V
+    await writeCacheFile(c)
+    return true
+  })
 }
 
 // ── 近用标签(输入区快捷 chips) ─────────────────────────────────────────────
@@ -938,6 +978,7 @@ function stopRecHard() {
 }
 
 // ── XSS 安全渲染:闪念正文 → DOM(只 createElement+textContent;标签可点过滤) ──
+const INLINE_RE = new RegExp(`${TAG_RE.source}|(https?:\\/\\/[^\\s]+)`, 'gu')
 function renderMemoText(container, text, onTag) {
   container.textContent = ''
   const lines = String(text == null ? '' : text).split('\n')
@@ -945,165 +986,94 @@ function renderMemoText(container, text, onTag) {
     if (MARKER_LINE.test(line)) continue // Amadeus 块标记行是宿主结构数据,不当正文展示(文件里原样保留)
     const div = document.createElement('div')
     div.className = 'mf-line'
-    let rest = line
-    const re = /#([^\s#]+)|(https?:\/\/[^\s]+)/
+    // 在整行上扫,不切片:TAG_RE 带 ^,切片后 a.com/#frag 的 #frag 会被当成行首
+    const re = new RegExp(INLINE_RE.source, INLINE_RE.flags)
+    let last = 0
     let m
-    while ((m = re.exec(rest))) {
-      if (m.index > 0) div.appendChild(document.createTextNode(rest.slice(0, m.index)))
-      if (m[1] != null && !/^\d+$/.test(m[1]) && !/^[\p{P}\p{S}]/u.test(m[1])) {
+    while ((m = re.exec(line))) {
+      const isTag = m[1] != null
+      if (isTag && NOT_TAG.test(m[1])) continue // 纯数字留给后面当普通文字
+      const start = isTag ? m.index + m[0].length - m[1].length - 1 : m.index // 前导空白算文字
+      if (start > last) div.appendChild(document.createTextNode(line.slice(last, start)))
+      last = re.lastIndex
+      if (isTag) {
         const tg = document.createElement('span')
         tg.className = 'mf-tag'
         tg.textContent = `#${m[1]}`
         if (onTag) { const name = m[1]; tg.addEventListener('click', () => onTag(name)) }
         div.appendChild(tg)
-      } else if (m[2] != null) {
+      } else {
         const a = document.createElement('a')
         a.textContent = m[2]
         const href = safeHref(m[2])
         if (href) { a.setAttribute('href', href); a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer') }
         div.appendChild(a)
-      } else {
-        div.appendChild(document.createTextNode(m[0]))
       }
-      rest = rest.slice(m.index + m[0].length)
     }
-    if (rest) div.appendChild(document.createTextNode(rest))
+    if (last < line.length) div.appendChild(document.createTextNode(line.slice(last)))
     container.appendChild(div)
   }
 }
 
-// ── 主题:吃宿主 token 派生 --mf-*(bluebird 手法,含热力图色阶) ──────────────
-let _probe = null
-function parseColor(css) {
-  try {
-    const s = (css || '').trim()
-    if (!s || !globalThis.document) return null
-    if (!_probe) {
-      const c = document.createElement('canvas')
-      if (typeof c.getContext !== 'function') return null
-      c.width = c.height = 1
-      _probe = c.getContext('2d', { willReadFrequently: true })
-    }
-    if (!_probe) return null
-    _probe.fillStyle = '#000000'; _probe.fillStyle = s; const a = _probe.fillStyle
-    _probe.fillStyle = '#ffffff'; _probe.fillStyle = s
-    if (a === '#000000' && _probe.fillStyle === '#ffffff') return null
-    _probe.clearRect(0, 0, 1, 1); _probe.fillRect(0, 0, 1, 1)
-    const d = _probe.getImageData(0, 0, 1, 1).data
-    return [d[0], d[1], d[2], d[3] / 255]
-  } catch { return null }
-}
-const relL = (c) => { const g = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4) }; return 0.2126 * g(c[0]) + 0.7152 * g(c[1]) + 0.0722 * g(c[2]) }
-const contrast = (a, b) => { const x = relL(a), y = relL(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
-const onColorOf = (accent) => (contrast(accent, [255, 255, 255]) >= contrast(accent, [22, 22, 26]) ? '#ffffff' : '#16161a')
-function readableOn(fg, bg, text, min = 3) {
-  let c = [fg[0], fg[1], fg[2]]
-  for (let i = 0; i < 12 && contrast(c, bg) < min; i++) c = c.map((v, k) => v + (text[k] - v) * 0.18)
-  return `rgb(${c.map((v) => Math.round(v)).join(',')})`
-}
-function syncTheme(rootEl) {
-  if (typeof getComputedStyle === 'undefined') return
-  let cs
-  try { cs = getComputedStyle(rootEl) } catch { return }
-  const tok = (n) => ((cs.getPropertyValue && cs.getPropertyValue(n)) || '').trim()
-  const rgb = parseColor(tok('--text')) || parseColor(cs.color) || [40, 40, 40, 1]
-  const dark = relL(rgb) > 0.5
-  const bgc = parseColor(tok('--bg')) || (dark ? [23, 24, 28, 1] : [255, 255, 255, 1])
-  const rd = Math.round
-  const f = (a) => `rgba(${rd(rgb[0])},${rd(rgb[1])},${rd(rgb[2])},${a})`
-  const accent = tok('--accent') || tok('--am-accent') || (dark ? '#cfc9ff' : '#4C2585')
-  const arc = parseColor(accent) || [76, 37, 133, 1]
-  const af = (a) => `rgba(${rd(arc[0])},${rd(arc[1])},${rd(arc[2])},${a})`
-  const set = (k, v) => rootEl.style.setProperty(`--mf-${k}`, v)
-  rootEl.style.colorScheme = dark ? 'dark' : 'light'
-  set('text', tok('--text') || `rgb(${rd(rgb[0])},${rd(rgb[1])},${rd(rgb[2])})`)
-  set('text-sec', tok('--text-light') || f(0.72)); set('text-muted', tok('--text-muted') || f(0.5)); set('text-subtle', tok('--text-faint') || f(0.32))
-  set('bg', tok('--bg') || `rgb(${rd(bgc[0])},${rd(bgc[1])},${rd(bgc[2])})`)
-  set('surf', tok('--bg-card') || f(0.045)); set('surf-sub', tok('--overlay-subtle') || f(0.025))
-  set('input', tok('--overlay-light') || f(0.05)); set('hover', tok('--overlay-medium') || f(0.08))
-  set('border', tok('--border') || f(0.16)); set('border-sub', tok('--overlay-medium') || f(0.09))
-  set('fill', accent); set('on-fill', tok('--on-accent') || onColorOf(arc))
-  set('primary', readableOn(arc, bgc, rgb)); set('tint', tok('--accent-light') || af(0.13)); set('glow', af(0.22))
-  set('danger', tok('--danger') || (dark ? '#e08a7d' : '#b03a2e'))
-  set('shadow', tok('--card-shadow') || (dark ? '0 4px 20px rgba(0,0,0,.4)' : '0 2px 12px rgba(0,0,0,.08)'))
-  set('heat0', f(0.07)); set('heat1', af(0.25)); set('heat2', af(0.45)); set('heat3', af(0.68)); set('heat4', af(0.9))
-}
-function themeObserver(rootEl) {
-  syncTheme(rootEl)
-  let disc = () => {}
-  if (typeof MutationObserver !== 'undefined') {
-    const ob = new MutationObserver(() => syncTheme(rootEl))
-    for (let n = rootEl.parentElement; n; n = n.parentElement) ob.observe(n, { attributes: true, attributeFilter: ['class', 'data-mode', 'data-theme', 'style'] })
-    disc = () => ob.disconnect()
-  }
-  const mq = globalThis.window && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
-  const onMq = () => syncTheme(rootEl)
-  if (mq && mq.addEventListener) mq.addEventListener('change', onMq)
-  return () => { disc(); if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq) }
-}
-
 const STYLE = `
-.mf-root{height:100%;min-height:0;overflow:auto;color:inherit;background:var(--mf-bg);font-size:13px;line-height:1.55}
+.mf-root{height:100%;min-height:0;overflow:auto;color:var(--text);background:var(--bg);font-size:13px;line-height:1.55}
 .mf-root *{box-sizing:border-box}
-.mf-root ::-webkit-scrollbar{width:6px;height:6px}.mf-root ::-webkit-scrollbar-thumb{background:var(--mf-border);border-radius:3px}
 .mf-wrap{max-width:760px;margin:0 auto;padding:18px 20px 48px;display:flex;flex-direction:column;gap:12px}
 .mf-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .mf-title{font-size:20px;font-weight:700}
-.mf-stats{font-size:11.5px;color:var(--mf-text-muted)}
+.mf-stats{font-size:11.5px;color:var(--text-muted)}
 .mf-flex1{flex:1}
-.mf-btn{padding:6px 12px;font:inherit;font-size:12px;color:var(--mf-text-sec);border:1px solid var(--mf-border);border-radius:10px;background:var(--mf-surf);cursor:pointer;transition:background .2s,border-color .2s,color .2s;white-space:nowrap}
-.mf-btn:hover:not(:disabled){background:var(--mf-tint);border-color:var(--mf-primary);color:var(--mf-primary)}
+.mf-btn{padding:6px 12px;font:inherit;font-size:12px;color:var(--text-muted);border:0;border-radius:var(--radius-sm);background:transparent;cursor:pointer;white-space:nowrap}
+.mf-btn:hover:not(:disabled){background:var(--overlay-medium);color:var(--text)}
 .mf-btn:disabled{opacity:.5;cursor:default}
-.mf-btn.primary{color:var(--mf-on-fill);background:var(--mf-fill);border-color:transparent;font-weight:500}
-.mf-btn.primary:hover:not(:disabled){color:var(--mf-on-fill);background:var(--mf-fill);filter:brightness(1.06)}
-.mf-btn.on{background:var(--mf-tint);border-color:var(--mf-primary);color:var(--mf-primary)}
-.mf-btn.sm{padding:4px 9px;font-size:11.5px;border-radius:8px}
-.mf-card{border-radius:14px;background:var(--mf-surf);border:1px solid var(--mf-border);box-shadow:var(--mf-shadow);padding:12px}
-.mf-ta{width:100%;min-height:66px;max-height:220px;resize:none;padding:9px 12px;font:inherit;color:var(--mf-text);background:var(--mf-input);border:1.5px solid var(--mf-border);border-radius:11px;outline:none;transition:border-color .2s,box-shadow .2s}
-.mf-ta::placeholder{color:var(--mf-text-subtle)}
-.mf-ta:focus{border-color:var(--mf-primary);box-shadow:0 0 0 3px var(--mf-glow)}
-.mf-input{padding:6px 10px;font:inherit;font-size:12px;color:var(--mf-text);background:var(--mf-input);border:1.5px solid var(--mf-border);border-radius:10px;outline:none;flex:1;min-width:120px}
-.mf-input:focus{border-color:var(--mf-primary)}
+.mf-btn.primary{color:var(--on-action);background:var(--action-fill);font-weight:500}
+.mf-btn.primary:hover:not(:disabled){color:var(--on-action);background:var(--action-fill-hover)}
+.mf-btn.on{background:var(--overlay-medium);color:var(--text)}
+.mf-btn.sm{padding:4px 9px;font-size:11.5px}
+.mf-card{border-radius:var(--radius-lg);background:var(--bg-card);box-shadow:var(--card-shadow);padding:12px 14px}
+.mf-ta{width:100%;min-height:66px;max-height:220px;resize:none;padding:0;font:inherit;color:var(--text);background:transparent;border:0;outline:none}
+.mf-ta::placeholder{color:var(--text-faint)}
+.mf-input{padding:6px 10px;font:inherit;font-size:12px;color:var(--text);background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);outline:none;flex:1;min-width:120px}
+.mf-input:focus{box-shadow:var(--focus-ring)}
 .mf-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.mf-chip{padding:2px 9px;border-radius:999px;background:var(--mf-tint);color:var(--mf-primary);font-size:11.5px;cursor:pointer;border:none;font-family:inherit}
-.mf-chip:hover{filter:brightness(1.08)}
-.mf-chip.x{background:var(--mf-surf);border:1px solid var(--mf-border);color:var(--mf-text-sec)}
-.mf-hint{font-size:11px;color:var(--mf-text-subtle)}
-.mf-vmsg{font-size:11px;color:var(--mf-danger);min-height:14px}
-.mf-voice.rec{color:var(--mf-danger);border-color:var(--mf-danger);animation:mfpulse 1.2s ease-in-out infinite}
+.mf-chip{padding:2px 9px;border-radius:var(--radius-pill);background:var(--overlay-medium);color:var(--text);font-size:12px;cursor:pointer;border:none;font-family:inherit;white-space:nowrap}
+.mf-chip:hover{background:var(--overlay-strong)}
+.mf-chip.x{background:transparent;color:var(--text-muted)}
+.mf-hint{font-size:11px;color:var(--text-faint)}
+.mf-vmsg{font-size:11px;color:var(--danger);min-height:14px}
+.mf-voice.rec{color:var(--danger);animation:mfpulse 1.2s ease-in-out infinite}
 @keyframes mfpulse{50%{opacity:.5}}
-.mf-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mf-text-muted)}
+.mf-label{font-size:11px;color:var(--text-faint)}
 .mf-rcards{display:flex;gap:10px;overflow-x:auto;padding:6px 0 2px}
-.mf-rcard{flex:0 0 230px;border:1px solid var(--mf-border-sub);border-radius:12px;padding:10px;background:var(--mf-surf-sub);display:flex;flex-direction:column;gap:6px}
-.mf-rdate{font-size:10.5px;color:var(--mf-text-subtle)}
+.mf-rcard{flex:0 0 230px;border-radius:var(--radius-md);padding:10px;background:var(--overlay-light);display:flex;flex-direction:column;gap:6px}
+.mf-rdate{font-size:11px;color:var(--text-faint)}
 .mf-rtext{font-size:12px;flex:1;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .mf-heat{display:grid;grid-template-rows:repeat(7,11px);grid-auto-flow:column;grid-auto-columns:11px;gap:3px;padding:4px 0}
-.mf-cell{width:11px;height:11px;border-radius:3px;background:var(--mf-heat0);cursor:pointer}
-.mf-cell.lv1{background:var(--mf-heat1)}.mf-cell.lv2{background:var(--mf-heat2)}.mf-cell.lv3{background:var(--mf-heat3)}.mf-cell.lv4{background:var(--mf-heat4)}
-.mf-cell.sel{outline:2px solid var(--mf-primary)}
+.mf-cell{width:11px;height:11px;border-radius:3px;background:var(--overlay-medium);cursor:pointer}
+.mf-cell.lv1{background:color-mix(in srgb,var(--text) 18%,transparent)}.mf-cell.lv2{background:color-mix(in srgb,var(--text) 32%,transparent)}.mf-cell.lv3{background:color-mix(in srgb,var(--text) 48%,transparent)}.mf-cell.lv4{background:color-mix(in srgb,var(--text) 62%,transparent)}
+.mf-cell.sel{outline:2px solid var(--accent-ink)}
 .mf-cell.future{visibility:hidden}
-.mf-day{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--mf-text-muted);margin:16px 2px 2px}
-.mf-memo{border:1px solid var(--mf-border-sub);border-radius:12px;padding:9px 12px;background:var(--mf-surf);margin-top:8px;transition:border-color .15s}
-.mf-memo:hover{border-color:var(--mf-primary)}
+.mf-day{font-size:11px;color:var(--text-faint);margin:18px 0 4px}
+.mf-memo{padding:6px 8px;margin:0 -8px;border-radius:var(--radius-sm);position:relative}
+.mf-memo:hover{background:var(--overlay-light)}
 .mf-memo.arch{opacity:.55}
-.mf-mtop{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--mf-text-muted)}
-.mf-flag{font-size:10px;padding:0 7px;border-radius:999px;background:var(--mf-tint);color:var(--mf-primary)}
-.mf-acts{margin-left:auto;display:flex;gap:2px;opacity:0;transition:opacity .15s}
-.mf-memo:hover .mf-acts{opacity:1}
-.mf-abtn{border:none;background:transparent;color:var(--mf-text-muted);cursor:pointer;font-size:11px;padding:2px 7px;border-radius:6px;font-family:inherit;white-space:nowrap}
-.mf-abtn:hover{background:var(--mf-hover);color:var(--mf-text)}
-.mf-abtn.danger:hover{color:var(--mf-danger)}
+.mf-mtop{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-faint)}
+.mf-flag{font-size:11px;color:var(--text-muted)}
+.mf-acts{margin-left:auto;display:flex;gap:2px;opacity:0;transition:opacity var(--duration-fast) var(--ease-calm)}
+.mf-memo:hover .mf-acts,.mf-memo:focus-within .mf-acts{opacity:1}
+.mf-abtn{border:none;background:transparent;color:var(--text-muted);cursor:pointer;font-size:11px;padding:2px 7px;border-radius:var(--radius-sm);font-family:inherit;white-space:nowrap}
+.mf-abtn:hover{background:var(--overlay-medium);color:var(--text)}
+.mf-abtn.danger:hover{color:var(--danger)}
 .mf-mbody{margin-top:4px;word-break:break-word}
 .mf-line{min-height:1.2em}
-.mf-tag{display:inline-block;background:var(--mf-tint);color:var(--mf-primary);border-radius:6px;padding:0 5px;cursor:pointer;font-size:.94em}
-.mf-tag:hover{filter:brightness(1.1)}
-.mf-mbody a{color:var(--mf-primary);word-break:break-all}
-.mf-empty{padding:44px 12px;text-align:center;color:var(--mf-text-subtle);font-size:12.5px}
-.mf-empty b{display:block;font-size:15px;color:var(--mf-text-muted);margin-bottom:8px}
-.mf-prog-head{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--mf-text-muted);margin-bottom:5px}
-.mf-prog-track{height:4px;border-radius:999px;background:var(--mf-border-sub);overflow:hidden}
-.mf-prog-fill{height:100%;width:0;border-radius:999px;background:var(--mf-primary);transition:width .5s ease-out}
-.mf-err{color:var(--mf-danger);font-size:12px}
+.mf-tag{color:var(--accent-ink);background:color-mix(in srgb,var(--accent-ink) 12%,transparent);border-radius:var(--radius-pill);padding:0 .4em;cursor:pointer;white-space:nowrap}
+.mf-mbody a{color:var(--accent-ink);word-break:break-all}
+.mf-empty{padding:44px 12px;text-align:center;color:var(--text-faint);font-size:12.5px}
+.mf-empty b{display:block;font-size:15px;font-weight:600;color:var(--text-muted);margin-bottom:8px}
+.mf-prog-head{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--text-muted);margin-bottom:5px}
+.mf-prog-track{height:4px;border-radius:var(--radius-pill);background:var(--overlay-medium);overflow:hidden}
+.mf-prog-fill{height:100%;width:0;border-radius:var(--radius-pill);background:var(--action-fill);transition:width var(--duration-slow) var(--ease-calm)}
+.mf-err{color:var(--danger);font-size:12px}
 `
 
 // ── UI 构件小工具(纯 createElement 直引用,check 的 DOM 垫片可直测) ─────────
@@ -1129,7 +1099,6 @@ function mountMemos(el) {
   const styleEl = h('style'); styleEl.textContent = STYLE; el.appendChild(styleEl)
   const rootEl = h('div', 'mf-root'); el.appendChild(rootEl)
   const wrap = h('div', 'mf-wrap'); rootEl.appendChild(wrap)
-  const offTheme = themeObserver(rootEl)
 
   let store = new Map()
   let loading = true
@@ -1586,7 +1555,7 @@ function mountMemos(el) {
       return
     }
     let items = flat.filter((it) => (showArch ? true : !it.m.archived))
-    if (filterTag) items = items.filter((it) => extractTags(it.m.text).includes(filterTag))
+    if (filterTag) items = items.filter((it) => extractTags(it.m.text).some((tg) => tagMatches(tg, filterTag)))
     if (filterDay) items = items.filter((it) => dayKeyOfIso(it.m.ts) === filterDay)
     if (searchQ.trim()) { const q = searchQ.trim().toLowerCase(); items = items.filter((it) => it.m.text.toLowerCase().includes(q)) }
     items.sort((a, b) => (a.m.ts < b.m.ts ? 1 : a.m.ts > b.m.ts ? -1 : 0))
@@ -1636,12 +1605,12 @@ function mountMemos(el) {
   async function ensureCacheFile() {
     try {
       const t = await ctx.app.readFile(cachePath())
-      if (t == null || t === '') await writeCacheFile({ days: {}, tags: {}, total: 0, builtAt: Date.now() })
+      if (t == null || t === '') await writeCacheFile({ v: CACHE_V, days: {}, tags: {}, total: 0, builtAt: Date.now() })
     } catch { /* 读失败 ≠ 缺席:什么都不写 */ }
   }
-  void ensureCacheFile().then(loadStore)
+  void ensureCacheFile().then(upgradeCacheTags).catch(() => {}).then(loadStore)
 
-  return () => { offTheme(); offBus(); if (offLocale) offLocale(); if (rec.active || rec.busy) stopRecHard() }
+  return () => { offBus(); if (offLocale) offLocale(); if (rec.active || rec.busy) stopRecHard() }
 }
 
 // ── 注册(id 全按 SPEC 钉死;07-18 后 API 一律可选链) ─────────────────────────
@@ -1675,7 +1644,7 @@ if (globalThis.__MEMOFLOW_TEST__) {
     monthSeq, isoWeekOf, dayKeyOf, dayKeyOfIso, monthKeyOf, daySerial, serialToKey, shiftDays,
     cacheFromMemos, bumpCacheObj, streakOf, buildDigestMessage, parseDigest, digestCorpus,
     safeHref, sanitizeFileName, renderMemoText, voiceAvailable, addMemo, quickCapture, memoToNote,
-    loadAll, rebuildCacheFromStore, onColorOf, readableOn, contrast, wfRoot, timeOfIso,
+    loadAll, rebuildCacheFromStore, upgradeCacheTags, wfRoot, timeOfIso, normTag, tagMatches,
     MSG, L, t, fmtDay, nMemos, nMonthFiles, joinList,
   })
 }

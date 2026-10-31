@@ -27,7 +27,11 @@ A.ok(!/innerHTML/.test(src), 'main.js 禁 innerHTML(shim 可直测 + XSS 面归�
 A.ok(!/querySelector/.test(src), 'main.js 禁 querySelector(全部直引用)')
 A.ok(!/setInterval/.test(src), '轮询用 setTimeout 自排程,禁 setInterval')
 A.ok(!/new Date\(\)/.test(src), '「现在」一律 Date.now(),禁裸 new Date()')
-A.ok(!/color:\s*#fff/i.test(src), 'CSS 不许写死白字(强调色上的字用 var(--mf-on-fill))')
+A.ok(!/color:\s*#fff/i.test(src), 'CSS 不许写死白字')
+A.ok(!/::-webkit-scrollbar/.test(src), 'DESIGN §6:全局禁写 ::-webkit-scrollbar')
+A.ok(!/[\s:]1\.5px/.test(src), '不用 1.5px 线框')
+A.ok(!/[🎙📌]/u.test(src), '词表里没有 emoji')
+A.ok(!/--mf-/.test(src), '样式只用宿主 token,不再派生 --mf-*')
 {
   const lines = src.split('\n')
   const asi = [...lines.keys()].filter((i) => {
@@ -178,10 +182,45 @@ A.deepEqual(T.monthSeq('bad', '2026-08'), [], '非法输入给空')
 
 // ── 标签解析:#中文 ok、#123 不算、# 后接标点不算、行中多个、去重 ──
 A.deepEqual(T.extractTags('想到 #forsion 和 #产品 再提 #forsion'), ['forsion', '产品'], '行中多个 + 去重')
-A.deepEqual(T.extractTags('编号 #123 不算,#中文标签 算'), ['中文标签'], '#纯数字不算、#中文 ok')
+A.deepEqual(T.extractTags('编号 #123 不算 #中文标签 算'), ['中文标签'], '#纯数字不算、#中文 ok')
 A.deepEqual(T.extractTags('#,bad #!x #。y'), [], '# 后接标点不算')
 A.deepEqual(T.extractTags('多行\n#tag2 第二行'), ['tag2'], '多行正文里也解析')
 A.deepEqual(T.extractTags(''), [])
+A.deepEqual(T.extractTags('今天看了 #设计,下周再说'), ['设计'], '中文逗号不吞句子')
+A.deepEqual(T.extractTags('今天看了 #设计，下周再说。'), ['设计'], '全角逗号同样到标点为止')
+A.deepEqual(T.extractTags('a.com/#frag'), [], 'URL 片段不算标签')
+A.deepEqual(T.extractTags('看过,#x'), [], '# 前面不是空白不算(和 Amadeus 一致)')
+// 解析对账:Genesis desktop/shared/amadeus/links.ts 的 TAG_RE + parseTags 过滤规则同款参照(不含 maskCode:闪念不做代码块遮罩)
+{
+  const GENESIS_TAG_RE = /(?:^|\s)#([\p{L}\p{N}_/-]+)/gu
+  const genesisParse = (md) => {
+    const out = [], seen = new Set()
+    for (const m of md.matchAll(GENESIS_TAG_RE)) {
+      const t = m[1]
+      if (/^[0-9/]+$/.test(t)) continue
+      const k = t.toLowerCase()
+      if (!seen.has(k)) { seen.add(k); out.push(t) }
+    }
+    return out
+  }
+  const SAMPLES = [
+    ['今天看了 #设计,下周再说', ['设计']], ['a.com/#frag', []], ['#产品/路线图 #产品/用户', ['产品/路线图', '产品/用户']],
+    ['#1 #1/2 #2026', []], ['#2026-10', ['2026-10']], ['#Foo #foo #FOO', ['Foo']], ['行首#不算 行中 #算', ['算']],
+    ['#a#b', ['a']], ['第一行\n#第二行 尾', ['第二行']], ['#snake_case #kebab-case', ['snake_case', 'kebab-case']],
+    ['#日本語 #한글 #émigré', ['日本語', '한글', 'émigré']], ['(#括号内)', []], ['# 空格', []], ['##双井', []],
+    ['tab\t#制表', ['制表']], ['#a/ #b//c', ['a/', 'b//c']], ['全角空格\u3000#标签', ['标签']],
+  ]
+  for (const [input, want] of SAMPLES) {
+    A.deepEqual(genesisParse(input), want, `对照样例本身:${input}`)
+    A.deepEqual(T.extractTags(input), want, `extractTags 与 Genesis 同口径:${input}`)
+  }
+}
+// 前缀匹配(同 Genesis tagMatches)
+A.equal(T.tagMatches('work', 'work'), true); A.equal(T.tagMatches('work/urgent', 'work'), true, '查 work 命中子标签')
+A.equal(T.tagMatches('workshop', 'work'), false, '查 work 不命中 workshop'); A.equal(T.tagMatches('Work/Urgent', 'wORK'), true, '大小写不敏感')
+A.equal(T.tagMatches('work', '#work/'), true, '查询串去 # 与尾斜杠'); A.equal(T.tagMatches('work', ''), false, '空查询不命中')
+A.equal(T.normTag(' #产品/路线图 '), '产品/路线图'); A.equal(T.normTag('a b'), null, '带空格不是标签名')
+A.equal(T.normTag('#123'), null, '纯数字不是标签名'); A.equal(T.normTag('1/2'), null); A.equal(T.normTag(''), null)
 
 // ── 月文件解析 / 序列化往返(多行条 / 标签 / 哨兵 / EOF 边界) ──
 const CANON = `# 2026-08
@@ -380,6 +419,11 @@ const BLOCK_MARKER_RE = /^<!--\s*a\s+([A-Za-z0-9_-]+)\s*-->\s*$/
   A.equal(tags.length, 1); A.equal(tags[0].textContent, '#tag1', '标签渲染成可点 chip')
   const links = byTag(box, 'a')
   A.equal(links.length, 1)
+  const box2 = mkEl('div')
+  T.renderMemoText(box2, '看 a.com/#frag 和 https://x.com/#y 再 #设计,下周 #123', () => {})
+  A.deepEqual(findAll(box2, (c) => c.className === 'mf-tag').map((c) => c.textContent), ['#设计'], '渲染的标签识别与解析同口径')
+  A.equal(box2.textContent, '看 a.com/#frag 和 https://x.com/#y 再 #设计,下周 #123', '切开渲染不丢任何一个字符')
+  A.equal(byTag(box2, 'a')[0].attrs.href, 'https://x.com/#y', '链接里的 # 留在链接里')
   A.equal(links[0].attrs.href, 'https://x.com', 'https 链接放行')
   A.equal(T.safeHref('javascript:alert(1)'), '', 'javascript: 拒绝')
 }
@@ -793,6 +837,43 @@ dispose()
   A.equal(V6.get(AUG6), augBefore, '当月文件一字未动(P0 链条闭环)')
   fail6 = null
   cleanup6(); dispose6()
+}
+
+// ── 旧版缓存:错标签要被重算掉,days 证词不能丢;月份读失败时一字不改 ──
+{
+  const CACHE = '闪念盒/.memoflow-cache.json', AUG = '闪念盒/2026-08.md'
+  const mkCtx = (V, fail) => ({
+    registerView() {}, registerCommand() {}, registerSetting() {},
+    app: {
+      notify() {}, openFile() {}, workFolder: () => '闪念盒',
+      readFile: async (p) => { if (fail && fail(p)) throw new Error('EBUSY (mock)'); return V.has(p) ? V.get(p) : null },
+      writeFile: async (p, t) => V.set(p, String(t)),
+    },
+  })
+  const stale = JSON.stringify({ days: { '2026-08-01': 1, '2025-01-01': 3 }, tags: { '设计,下周再说': 1 }, total: 4, builtAt: 1 })
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+  const V = new Map([[CACHE, stale], [AUG, '# 2026-08\n\n### 2026-08-01T02:00:00.000Z\n今天看了 #设计,下周再说\n']])
+  globalThis.__MEMOFLOW_TEST__ = {}
+  const d1 = new Function('ctx', src)(mkCtx(V, (p) => p.endsWith('2025-01.md') ? true : false))
+  await globalThis.__MEMOFLOW_TEST__.upgradeCacheTags()
+  A.equal(V.get(CACHE), stale, '旧缓存 + 有月份读失败:缓存一字不改,下次再试')
+  d1()
+  _ls.set('plugin.memoflow.firstMonth', '2026-08')
+  globalThis.__MEMOFLOW_TEST__ = {}
+  const d2 = new Function('ctx', src)(mkCtx(V))
+  await globalThis.__MEMOFLOW_TEST__.upgradeCacheTags()
+  const up = JSON.parse(V.get(CACHE))
+  A.deepEqual(up.tags, { 设计: 1 }, '旧缓存的错标签被新规则重算掉')
+  A.equal(up.v, 2, '升级后写上新版本号')
+  A.deepEqual(up.days, { '2026-08-01': 1, '2025-01-01': 3 }, '只换 tags:days 证词原样保留(不由 loadAll 的残缺视野重算)')
+  A.equal(up.total, 4, 'total 不动')
+  A.equal(_ls.get('plugin.memoflow.firstMonth'), '2025-01', '缓存里更早的月份补进扫描起点')
+  const body = V.get(AUG)
+  A.ok(body.includes('今天看了 #设计,下周再说'), '升级不碰月文件正文')
+  const after = V.get(CACHE)
+  await globalThis.__MEMOFLOW_TEST__.upgradeCacheTags()
+  A.equal(V.get(CACHE), after, '已是新版本:不重算不重写')
+  d2()
 }
 
 // ── 旧宿主 A(有 registerView,但无 statusItem / transcribeAudio / achievements / notify / activity / workFolder):
